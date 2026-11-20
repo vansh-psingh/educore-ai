@@ -10,7 +10,7 @@ const API_BASE = (() => {
     if (saved !== null) return saved;
   } catch (e) { /* ignore */ }
   return /(^|\.)(web\.app|firebaseapp\.com)$/.test(location.hostname)
-    ? "https://educore-ai-backend.onrender.com"   // TODO: update after Render deploy
+    ? "https://answering-six-outline-elect.trycloudflare.com"   // Cloudflare quick tunnel -> local backend
     : "";
 })();
 

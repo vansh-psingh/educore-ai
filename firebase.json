@@ -6,15 +6,7 @@
       "**/.*",
       "**/node_modules/**"
     ],
-    "rewrites": [
-      {
-        "source": "/api/**",
-        "run": {
-          "serviceId": "educore-ai",
-          "region": "asia-south1"
-        }
-      }
-    ],
+    "rewrites": [],
     "headers": [
       {
         "source": "/static/**",
