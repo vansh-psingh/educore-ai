@@ -10,7 +10,7 @@ const API_BASE = (() => {
     if (saved !== null) return saved;
   } catch (e) { /* ignore */ }
   return /(^|\.)(web\.app|firebaseapp\.com)$/.test(location.hostname)
-    ? "https://answering-six-outline-elect.trycloudflare.com"   // Cloudflare quick tunnel -> local backend
+    ? "https://hereby-monitored-delivers-pants.trycloudflare.com"   // Cloudflare quick tunnel -> local backend
     : "";
 })();
 
@@ -47,12 +47,19 @@ function clearTokens() {
 
 const API = {
   async post(path, body, _retried) {
-    const res = await fetch(API_BASE + path, {
-      method: "POST",
-      headers: { "Content-Type": "application/json", ...authHeaders() },
-      credentials: "include",
-      body: JSON.stringify(body || {})
-    });
+    let res;
+    try {
+      res = await fetch(API_BASE + path, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", ...authHeaders() },
+        credentials: "include",
+        body: JSON.stringify(body || {})
+      });
+    } catch (e) {
+      const err = new Error("Cannot reach the server. Check your internet connection and try again.");
+      err.status = 0;
+      throw err;
+    }
     // auto-refresh once on expired access token, then retry
     if (res.status === 401 && !_retried && !path.startsWith("/api/auth/")) {
       try {
