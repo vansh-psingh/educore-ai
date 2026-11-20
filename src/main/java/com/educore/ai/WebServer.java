@@ -67,7 +67,7 @@ public final class WebServer {
                 String type = rel.endsWith(".css") ? "text/css; charset=UTF-8"
                         : rel.endsWith(".js") ? "text/javascript; charset=UTF-8"
                         : "application/octet-stream";
-                exchange.getResponseHeaders().set("Cache-Control", "public, max-age=3600");
+                exchange.getResponseHeaders().set("Cache-Control", "public, max-age=300");
                 serveStatic(exchange, "static/" + rel, type);
             } else {
                 send(exchange, 404, "{\"error\":\"not found\"}", "application/json");
