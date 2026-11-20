@@ -1205,7 +1205,7 @@ function authShell(inner) {
   <div class="auth-page">
     <div class="auth-card">
       <div class="auth-brand">
-        <div class="brand-logo" style="width:52px;height:52px;font-size:26px;margin:0 auto 12px">E</div>
+        <img class="brand-logo-full" src="/static/assets/logo-full.png" alt="EDUCORE AI">
         <div class="brand-name" style="text-align:center">EDUCORE <span class="brand-ai">AI</span></div>
         <p class="muted" style="text-align:center;margin-top:4px">Learn Smarter. Understand Deeper.</p>
       </div>
