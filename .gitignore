@@ -1,0 +1,8 @@
+target/
+data/
+.env
+*.log
+firebase-debug.log
+ui-debug.log
+.DS_Store
+deploy/

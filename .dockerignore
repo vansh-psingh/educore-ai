@@ -1,0 +1,7 @@
+target/
+data/
+.env
+.git/
+*.log
+firebase-debug.log
+.firebaserc

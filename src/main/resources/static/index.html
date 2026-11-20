@@ -1,0 +1,85 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>EDUCORE AI — Learn Smarter. Understand Deeper.</title>
+<link rel="stylesheet" href="/static/css/dashboard.css">
+<link rel="stylesheet" href="/static/vendor/katex.min.css">
+</head>
+<body>
+<div id="app">
+
+  <!-- ============ SIDEBAR ============ -->
+  <aside id="sidebar">
+    <div class="brand">
+      <div class="brand-logo">E</div>
+      <div class="brand-text">
+        <span class="brand-name">EDUCORE</span>
+        <span class="brand-ai">AI</span>
+      </div>
+      <button id="collapseBtn" class="icon-btn collapse-btn" title="Collapse sidebar"></button>
+    </div>
+
+    <nav id="nav">
+      <a class="nav-item active" data-view="overview" href="#/overview"></a>
+      <a class="nav-item" data-view="tutor" href="#/tutor"></a>
+      <a class="nav-item" data-view="workspace" href="#/workspace"></a>
+      <a class="nav-item" data-view="notes" href="#/notes"></a>
+      <a class="nav-item" data-view="summarizer" href="#/summarizer"></a>
+      <a class="nav-item" data-view="quiz" href="#/quiz"></a>
+      <a class="nav-item" data-view="exams" href="#/exams"></a>
+      <a class="nav-item" data-view="documents" href="#/documents"></a>
+      <a class="nav-item" data-view="progress" href="#/progress"></a>
+      <a class="nav-item" data-view="planner" href="#/planner"></a>
+      <a class="nav-item" data-view="classrooms" href="#/classrooms"></a>
+      <div class="nav-divider"></div>
+      <a class="nav-item" data-view="notifications" href="#/notifications"></a>
+      <a class="nav-item" data-view="settings" href="#/settings"></a>
+    </nav>
+
+    <div class="sidebar-footer">
+      <div class="profile-chip" id="profileChip">
+        <div class="avatar">S</div>
+        <div class="profile-meta">
+          <span class="profile-name">Student</span>
+          <span class="profile-role">Free plan</span>
+        </div>
+      </div>
+      <div class="sidebar-actions">
+        <button class="icon-btn" id="logoutBtn" title="Log out"></button>
+      </div>
+    </div>
+  </aside>
+  <div id="sidebarOverlay"></div>
+
+  <!-- ============ MAIN ============ -->
+  <div id="main">
+    <header id="topbar">
+      <button id="menuBtn" class="icon-btn mobile-only"></button>
+      <h1 id="pageTitle">Overview</h1>
+      <div class="topbar-right">
+        <div class="search-box">
+          <input id="globalSearch" type="text" placeholder="Search...">
+        </div>
+        <button class="icon-btn" id="notifBtn" title="Notifications"></button>
+        <button class="icon-btn" id="helpBtn" title="Help & support"></button>
+        <button class="icon-btn" id="themeBtn" title="Toggle theme"></button>
+        <div class="avatar avatar-sm">S</div>
+      </div>
+    </header>
+
+    <main id="view"></main>
+  </div>
+</div>
+
+<div id="toast"></div>
+
+<script src="/static/vendor/katex.min.js"></script>
+<script src="/static/vendor/auto-render.min.js"></script>
+<script src="/static/js/icons.js"></script>
+<script src="/static/js/api.js"></script>
+<script src="/static/js/app.js"></script>
+<script src="/static/js/modules.js"></script>
+</body>
+</html>
