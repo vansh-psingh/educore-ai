@@ -14,11 +14,42 @@ const API_BASE = (() => {
     : "";
 })();
 
+// Bearer-token auth: works cross-site where third-party cookies are blocked
+// (Safari, Chrome incognito, mobile browsers). Falls back to cookies too.
+let _at = null, _rt = null;
+try {
+  _at = localStorage.getItem("educore_at");
+  _rt = localStorage.getItem("educore_rt");
+} catch (e) { /* ignore */ }
+
+function saveTokens(d) {
+  if (!d) return;
+  if (d.access_token) {
+    _at = d.access_token;
+    try { localStorage.setItem("educore_at", _at); } catch (e) {}
+  }
+  if (d.refresh_token) {
+    _rt = d.refresh_token;
+    try { localStorage.setItem("educore_rt", _rt); } catch (e) {}
+  }
+}
+
+function authHeaders() {
+  const h = {};
+  if (_at) h["Authorization"] = "Bearer " + _at;
+  return h;
+}
+
+function clearTokens() {
+  _at = _rt = null;
+  try { localStorage.removeItem("educore_at"); localStorage.removeItem("educore_rt"); } catch (e) {}
+}
+
 const API = {
   async post(path, body, _retried) {
     const res = await fetch(API_BASE + path, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: { "Content-Type": "application/json", ...authHeaders() },
       credentials: "include",
       body: JSON.stringify(body || {})
     });
@@ -39,15 +70,19 @@ const API = {
   },
 
   // ---------- auth ----------
-  authRegister(p) { return this.post("/api/auth/register", p); },
-  authLogin(p) { return this.post("/api/auth/login", p); },
-  authRefresh() { return this.post("/api/auth/refresh", {}); },
-  authLogout() { return this.post("/api/auth/logout", {}); },
+  async authRegister(p) { const r = await this.post("/api/auth/register", p); saveTokens(r); return r; },
+  async authLogin(p) { const r = await this.post("/api/auth/login", p); saveTokens(r); return r; },
+  async authRefresh() {
+    const r = await this.post("/api/auth/refresh", _rt ? { refresh_token: _rt } : {});
+    saveTokens(r);
+    return r;
+  },
+  async authLogout() { try { await this.post("/api/auth/logout", {}); } finally { clearTokens(); } },
   authForgot(p) { return this.post("/api/auth/forgot", p); },
   authReset(p) { return this.post("/api/auth/reset", p); },
   authChangePassword(p) { return this.post("/api/auth/change-password", p); },
   async authMe() {
-    const res = await fetch(API_BASE + "/api/auth/me", { credentials: "include" });
+    const res = await fetch(API_BASE + "/api/auth/me", { credentials: "include", headers: authHeaders() });
     if (!res.ok) {
       const e = new Error("unauthenticated");
       e.status = res.status;
@@ -69,7 +104,7 @@ const API = {
     const res = await fetch(API_BASE + "/api/ai/chat_stream", {
       credentials: "include",
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: { "Content-Type": "application/json", ...authHeaders() },
       body: JSON.stringify(payload),
       signal
     });
@@ -105,7 +140,7 @@ const API = {
   aiVision(payload) { return this.post("/api/ai/vision", payload); },
   feedback(payload) { return this.post("/api/feedback", payload); },
   async feedbackStats() {
-    const res = await fetch(API_BASE + "/api/feedback/stats", { credentials: "include" });
+    const res = await fetch(API_BASE + "/api/feedback/stats", { credentials: "include", headers: authHeaders() });
     return res.json();
   },
   aiNotes(payload) { return this.post("/api/ai/notes", payload); },
@@ -118,12 +153,12 @@ const API = {
     const params = new URLSearchParams();
     if (q) params.set("q", q);
     if (sort) params.set("sort", sort);
-    const res = await fetch(API_BASE + "/api/notes" + (params.toString() ? "?" + params : ""), { credentials: "include" });
+    const res = await fetch(API_BASE + "/api/notes" + (params.toString() ? "?" + params : ""), { credentials: "include", headers: authHeaders() });
     if (!res.ok) throw new Error("HTTP " + res.status);
     return res.json();
   },
   async note(id) {
-    const res = await fetch(API_BASE + "/api/notes/" + id, { credentials: "include" });
+    const res = await fetch(API_BASE + "/api/notes/" + id, { credentials: "include", headers: authHeaders() });
     if (!res.ok) throw new Error("HTTP " + res.status);
     return res.json();
   },
@@ -138,17 +173,17 @@ const API = {
   examGenerate(payload) { return this.post("/api/exams/generate", payload); },
   examSubmit(id, answers) { return this.post(`/api/exams/${id}/submit`, { answers }); },
   async examHistory() {
-    const res = await fetch(API_BASE + "/api/exams/history", { credentials: "include" });
+    const res = await fetch(API_BASE + "/api/exams/history", { credentials: "include", headers: authHeaders() });
     return res.json();
   },
 
   // documents
   async docs() {
-    const res = await fetch(API_BASE + "/api/documents", { credentials: "include" });
+    const res = await fetch(API_BASE + "/api/documents", { credentials: "include", headers: authHeaders() });
     return res.json();
   },
   async doc(id) {
-    const res = await fetch(API_BASE + "/api/documents/" + id, { credentials: "include" });
+    const res = await fetch(API_BASE + "/api/documents/" + id, { credentials: "include", headers: authHeaders() });
     return res.json();
   },
   docUpload(name, dataBase64) { return this.post("/api/documents/upload", { name, data: dataBase64 }); },
@@ -158,7 +193,7 @@ const API = {
 
   // planner
   async plannerTasks() {
-    const res = await fetch(API_BASE + "/api/planner/tasks", { credentials: "include" });
+    const res = await fetch(API_BASE + "/api/planner/tasks", { credentials: "include", headers: authHeaders() });
     return res.json();
   },
   plannerCreate(payload) { return this.post("/api/planner/tasks", payload); },
@@ -168,7 +203,7 @@ const API = {
 
   // classrooms
   async classrooms() {
-    const res = await fetch(API_BASE + "/api/classrooms", { credentials: "include" });
+    const res = await fetch(API_BASE + "/api/classrooms", { credentials: "include", headers: authHeaders() });
     return res.json();
   },
   classroomCreate(payload) { return this.post("/api/classrooms/create", payload); },
