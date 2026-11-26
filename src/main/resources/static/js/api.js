@@ -256,6 +256,7 @@ const API = {
   },
 
   aiVision(payload) { return this.post("/api/ai/vision", payload); },
+  videoSearch(payload) { return this.post("/api/videos", payload); },
   feedback(payload) { return this.post("/api/feedback", payload); },
   async feedbackStats() {
     const res = await fetch(API_BASE + "/api/feedback/stats", { credentials: "include", headers: authHeaders() });

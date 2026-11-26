@@ -306,6 +306,27 @@ public final class WebServer {
             }
         });
 
+        server.createContext("/api/videos", exchange -> {
+            if (preflight(exchange)) return;
+            cors(exchange);
+            AuthService.AuthUser authUser = requireUser(exchange);
+            if (authUser == null) return;
+            if (!"POST".equals(exchange.getRequestMethod())) {
+                send(exchange, 405, "{\"error\":\"method not allowed\"}", "application/json");
+                return;
+            }
+            try {
+                if (requireAiQuota(exchange, authUser)) return;
+                JsonNode req = MAPPER.readTree(
+                        new String(exchange.getRequestBody().readAllBytes(), StandardCharsets.UTF_8));
+                sendJson(exchange, 200, VideoService.search(req));
+            } catch (IllegalArgumentException e) {
+                send(exchange, 400, "{\"error\":\"" + escape(e.getMessage()) + "\"}", "application/json");
+            } catch (Exception e) {
+                send(exchange, 500, "{\"error\":\"video search failed\"}", "application/json");
+            }
+        });
+
         server.createContext("/api/chat", exchange -> {
             if (preflight(exchange)) return;
             cors(exchange);

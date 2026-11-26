@@ -1213,11 +1213,170 @@ function vWorkspace(root) {
           <span class="btn btn-ghost">Open</span>
         </a>`).join("")}
     </div>
+    <div class="card lvf-card" style="margin-top:18px">
+      <div class="section-title" style="margin-top:0">${icon("video")} Lecture Video Finder</div>
+      <p class="muted" style="margin-bottom:14px">Find the best YouTube lectures for any topic - curated for your level and language.</p>
+      <div class="lvf-grid">
+        <div class="field"><label>Subject</label><input type="text" id="lvfSubject" placeholder="e.g. Data Structures, Organic Chemistry, Physics"></div>
+        <div class="field"><label>Topic / Chapter</label><input type="text" id="lvfTopic" placeholder="e.g. Binary Search Trees, Thermodynamics"></div>
+        <div class="field"><label>Academic Level / Course</label>
+          <select id="lvfLevel">
+            <option value="School / High School">School / High School</option>
+            <option value="Undergraduate / B.Tech" selected>Undergraduate / B.Tech</option>
+            <option value="Competitive Exams">Competitive Exams</option>
+            <option value="Beginner Crash Course">Beginner Crash Course</option>
+          </select></div>
+        <div class="field"><label>Language</label>
+          <select id="lvfLang"><option>English</option><option>Hindi</option><option>Hinglish</option></select></div>
+        <div class="field"><label>Lecture Type</label>
+          <select id="lvfFormat">
+            <option value="full chapter lecture">One-Shot / Full Chapter</option>
+            <option value="detailed playlist">Detailed Playlist</option>
+            <option value="quick revision">Quick Concept Revision</option>
+          </select></div>
+        <div class="field lvf-go-wrap">
+          <button class="btn btn-primary lvf-go" id="lvfGo">${icon("play")} Find Best Lectures</button>
+        </div>
+      </div>
+      <div id="lvfResults"></div>
+    </div>
     <div class="card" style="margin-top:18px">
       <div class="section-title" style="margin-top:0">${icon("sparkles")} Daily focus</div>
       <p class="muted">Consistency beats intensity - even 30 focused minutes daily builds real progress. Use the Learning Progress page to see which topics need revision based on your quiz scores.</p>
     </div>
   </div>`;
+
+  // prefill academic level from the student profile when possible
+  getProfile().then(p => {
+    const prof = p && p.profile ? p.profile : {};
+    const q = (prof.qualification || "") + " " + (prof.academic_year || "");
+    const lvl = document.getElementById("lvfLevel");
+    if (!lvl) return;
+    if (/school|secondary|higher secondary/i.test(q)) lvl.value = "School / High School";
+    else if (/undergrad|postgrad|diploma|b\.tech|bachelor|master/i.test(q)) lvl.value = "Undergraduate / B.Tech";
+  }).catch(() => {});
+
+  document.getElementById("lvfGo").addEventListener("click", lvfSearch);
+}
+
+/* ---------- Lecture Video Finder ---------- */
+
+const LVF_LEVEL_QUERY = {
+  "School / High School": "high school",
+  "Undergraduate / B.Tech": "undergraduate lecture",
+  "Competitive Exams": "competitive exam preparation",
+  "Beginner Crash Course": "crash course"
+};
+
+async function lvfSearch() {
+  const subject = document.getElementById("lvfSubject").value.trim();
+  const topic = document.getElementById("lvfTopic").value.trim();
+  if (!subject && !topic) { toast("Enter a subject or topic first."); return; }
+
+  const btn = document.getElementById("lvfGo");
+  const out = document.getElementById("lvfResults");
+  btn.disabled = true;
+  btn.classList.add("loading");
+  btn.innerHTML = `${icon("video")} Searching...`;
+  out.innerHTML = `<div class="vid-grid">${'<div class="vid-card"><div class="skel skel-line" style="height:140px"></div><div class="skel skel-line" style="width:70%"></div></div>'.repeat(3)}</div>`;
+
+  try {
+    const r = await API.videoSearch({
+      subject,
+      topic,
+      level: LVF_LEVEL_QUERY[document.getElementById("lvfLevel").value] || document.getElementById("lvfLevel").value,
+      language: document.getElementById("lvfLang").value,
+      format: document.getElementById("lvfFormat").value
+    });
+    renderVideoResults(r);
+  } catch (e) {
+    out.innerHTML = `<div class="card" style="margin-top:14px"><div class="auth-error">${esc(e.message)}</div></div>`;
+  } finally {
+    btn.disabled = false;
+    btn.classList.remove("loading");
+    btn.innerHTML = `${icon("play")} Find Best Lectures`;
+  }
+}
+
+function renderVideoResults(r) {
+  const out = document.getElementById("lvfResults");
+  if (!out) return;
+  const cards = [];
+
+  if (r.mode === "api" && Array.isArray(r.videos)) {
+    r.videos.forEach(v => cards.push(`
+      <div class="vid-card">
+        <div class="vid-thumb">
+          ${v.thumbnail ? `<img src="${esc(v.thumbnail)}" alt="" loading="lazy" referrerpolicy="no-referrer">` : ""}
+          ${v.duration ? `<span class="vid-dur">${esc(v.duration)}</span>` : ""}
+          <button class="vid-play" data-embed="${esc(v.embed)}" title="Watch here">${icon("play")}</button>
+        </div>
+        <div class="vid-meta">
+          <div class="vid-title">${esc(v.title)}</div>
+          <div class="vid-sub muted">${esc(v.channel)}${v.published ? " · " + esc(v.published) : ""}</div>
+          <div class="vid-actions">
+            <button class="btn btn-primary btn-sm" data-embed="${esc(v.embed)}">${icon("play")} Watch Here</button>
+            <a class="btn btn-ghost btn-sm" href="${esc(v.url)}" target="_blank" rel="noopener">${icon("external")} YouTube</a>
+          </div>
+        </div>
+      </div>`));
+  } else {
+    // no API key: smart YouTube search cards - Watch Here embeds the
+    // search-results player so real lectures play without any key
+    (r.results || []).forEach(v => {
+      const embed = "https://www.youtube-nocookie.com/embed?listType=search&list=" + encodeURIComponent(v.query || r.query || "");
+      cards.push(`
+      <div class="vid-card">
+        <div class="vid-thumb vid-thumb-alt">
+          <div class="vid-thumb-icon">${icon("video")}</div>
+          <button class="vid-play" data-embed="${esc(embed)}" title="Watch here">${icon("play")}</button>
+        </div>
+        <div class="vid-meta">
+          <div class="vid-title">${esc(v.title)}</div>
+          <div class="vid-sub muted">${esc(v.channel)} · smart search</div>
+          <div class="vid-actions">
+            <button class="btn btn-primary btn-sm" data-embed="${esc(embed)}">${icon("play")} Watch Here</button>
+            <a class="btn btn-ghost btn-sm" href="${esc(v.url)}" target="_blank" rel="noopener">${icon("external")} YouTube</a>
+          </div>
+        </div>
+      </div>`);
+    });
+  }
+
+  if (!cards.length) {
+    out.innerHTML = `<div class="card" style="margin-top:14px"><div class="muted">No lecture results found. Try broadening the topic or level.</div></div>`;
+    return;
+  }
+  out.innerHTML = `<div class="vid-grid">${cards.join("")}</div>
+    <div class="muted" style="margin-top:10px;font-size:12px">Query: “${esc(r.query || "")}”${r.mode === "links" ? " · configure YOUTUBE_API_KEY for direct video results" : ""}</div>`;
+  out.querySelectorAll("[data-embed]").forEach(b =>
+    b.addEventListener("click", () => openVideoModal(b.dataset.embed)));
+}
+
+function openVideoModal(embedUrl) {
+  closeVideoModal();
+  const ov = document.createElement("div");
+  ov.className = "video-modal";
+  ov.innerHTML = `<div class="video-modal-box">
+    <button class="video-modal-close" title="Close">✕</button>
+    <div class="video-modal-frame">
+      <iframe src="${esc(embedUrl)}" title="Lecture video"
+        allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
+        allowfullscreen></iframe>
+    </div>
+  </div>`;
+  const onKey = e => { if (e.key === "Escape") closeVideoModal(); };
+  ov._onKey = onKey;
+  ov.addEventListener("click", e => { if (e.target === ov) closeVideoModal(); });
+  document.body.appendChild(ov);
+  document.addEventListener("keydown", onKey);
+  ov.querySelector(".video-modal-close").onclick = closeVideoModal;
+}
+function closeVideoModal() {
+  document.querySelectorAll(".video-modal").forEach(m => {
+    if (m._onKey) document.removeEventListener("keydown", m._onKey);
+    m.remove();
+  });
 }
 
 /* ---------- Notes Generator ---------- */
