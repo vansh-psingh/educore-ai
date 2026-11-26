@@ -1,0 +1,74 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="EDUCORE AI">
+  <defs>
+    <linearGradient id="eg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#22d3ee"/>
+      <stop offset=".55" stop-color="#3b82f6"/>
+      <stop offset="1" stop-color="#8b5cf6"/>
+    </linearGradient>
+    <linearGradient id="pg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#a78bfa"/>
+      <stop offset="1" stop-color="#7c3aed"/>
+    </linearGradient>
+    <radialGradient id="ng" cx=".5" cy=".5" r=".5">
+      <stop offset="0" stop-color="#ffffff"/>
+      <stop offset=".4" stop-color="#67e8f9"/>
+      <stop offset="1" stop-color="#22d3ee" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+
+  <!-- neural mesh inside the mortarboard -->
+  <g fill="none" stroke-linecap="round">
+    <g stroke="url(#eg)" stroke-width="3" opacity=".16">
+      <path d="M32 10 52 20 32 30 12 20Z"/>
+      <path d="M32 20V10M32 20H52M32 20V30M32 20H12"/>
+      <path d="M22 15H42M22 15V25M42 15V25M42 25H22M22 25V15"/>
+      <path d="M22 15 32 20 42 15M22 25 32 20 42 25"/>
+    </g>
+    <g stroke="url(#eg)" stroke-width="1.1" opacity=".9">
+      <path d="M32 10 52 20 32 30 12 20Z"/>
+      <path d="M32 20V10M32 20H52M32 20V30M32 20H12"/>
+      <path d="M22 15H42M22 15V25M42 15V25M42 25H22M22 25V15"/>
+      <path d="M22 15 32 20 42 15M22 25 32 20 42 25"/>
+    </g>
+  </g>
+
+  <!-- cap band (head piece) -->
+  <g fill="none" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M20 30 44 30 48 48 16 48Z" stroke="url(#pg)" stroke-width="2.6" opacity=".2"/>
+    <path d="M20 30 44 30 48 48 16 48Z" stroke="url(#pg)" stroke-width="1.1" opacity=".85"/>
+    <path d="M24 38 32 45 40 38" stroke="url(#pg)" stroke-width="1" opacity=".7"/>
+  </g>
+
+  <!-- tassel -->
+  <g fill="none" stroke-linecap="round">
+    <path d="M52 20 57 35" stroke="url(#pg)" stroke-width="2.4" opacity=".25"/>
+    <path d="M52 20 57 35" stroke="url(#pg)" stroke-width="1.2" opacity=".9"/>
+  </g>
+
+  <!-- nodes: glow underlay + core -->
+  <g>
+    <g fill="#22d3ee" opacity=".28">
+      <circle cx="32" cy="10" r="4.2"/><circle cx="52" cy="20" r="4.2"/>
+      <circle cx="32" cy="30" r="4.2"/><circle cx="12" cy="20" r="4.2"/>
+      <circle cx="57" cy="35" r="3.4"/>
+    </g>
+    <g fill="#60a5fa" opacity=".3">
+      <circle cx="22" cy="15" r="3"/><circle cx="42" cy="15" r="3"/>
+      <circle cx="22" cy="25" r="3"/><circle cx="42" cy="25" r="3"/>
+    </g>
+    <g fill="#22d3ee">
+      <circle cx="32" cy="10" r="2.1"/><circle cx="52" cy="20" r="2.1"/>
+      <circle cx="32" cy="30" r="2.1"/><circle cx="12" cy="20" r="2.1"/>
+    </g>
+    <g fill="#60a5fa">
+      <circle cx="22" cy="15" r="1.5"/><circle cx="42" cy="15" r="1.5"/>
+      <circle cx="22" cy="25" r="1.5"/><circle cx="42" cy="25" r="1.5"/>
+    </g>
+    <circle cx="57" cy="35" r="2" fill="#a78bfa"/>
+
+    <!-- central glowing AI node -->
+    <circle cx="32" cy="20" r="7" fill="url(#ng)"/>
+    <circle cx="32" cy="20" r="6" fill="none" stroke="#67e8f9" stroke-width=".8" opacity=".8"/>
+    <circle cx="32" cy="20" r="2.8" fill="#ffffff"/>
+  </g>
+</svg>
