@@ -136,9 +136,13 @@ public final class ProfileService {
 
     /** Writes a mutated user record back into users.json (keyed by email). */
     static void persistUser(ObjectNode un) {
-        ObjectNode root = Store.obj(Store.read("users.json"));
-        root.set(un.path("email").asText().toLowerCase(), un);
-        Store.write("users.json", root);
+        // atomic read-modify-write: prevents lost updates between concurrent
+        // profile/mobile/theme writes (Store.read/write lock on Store.class)
+        synchronized (Store.class) {
+            ObjectNode root = Store.obj(Store.read("users.json"));
+            root.set(un.path("email").asText().toLowerCase(), un);
+            Store.write("users.json", root);
+        }
     }
 
     private ProfileService() {

@@ -158,9 +158,13 @@ public final class AuthService {
     }
 
     private static void saveUser(String email, ObjectNode user) {
-        ObjectNode root = users();
-        root.set(email.trim().toLowerCase(), user);
-        Store.write("users.json", root);
+        // hold Store's monitor across read+write so concurrent signups/updates
+        // cannot lose records (Store.read/write synchronize on Store.class)
+        synchronized (Store.class) {
+            ObjectNode root = users();
+            root.set(email.trim().toLowerCase(), user);
+            Store.write("users.json", root);
+        }
     }
 
     // ================= public API =================

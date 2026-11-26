@@ -79,7 +79,17 @@ public final class Store {
     private static void writeJson(String name, JsonNode node) {
         try {
             Files.createDirectories(DIR);
-            MAPPER.writerWithDefaultPrettyPrinter().writeValue(DIR.resolve(name).toFile(), node);
+            // write to a temp file then move atomically - a crash mid-write
+            // can never leave a truncated/corrupt JSON store behind
+            Path tmp = DIR.resolve(name + ".tmp");
+            Path target = DIR.resolve(name);
+            MAPPER.writerWithDefaultPrettyPrinter().writeValue(tmp.toFile(), node);
+            try {
+                Files.move(tmp, target, java.nio.file.StandardCopyOption.ATOMIC_MOVE,
+                        java.nio.file.StandardCopyOption.REPLACE_EXISTING);
+            } catch (java.nio.file.AtomicMoveNotSupportedException e) {
+                Files.move(tmp, target, java.nio.file.StandardCopyOption.REPLACE_EXISTING);
+            }
         } catch (IOException e) {
             throw new IllegalStateException("Failed to write store file: " + name, e);
         }

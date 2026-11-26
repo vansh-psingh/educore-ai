@@ -329,22 +329,25 @@ public final class AdminService {
             }
         } else {
             // JSON mode: update the user node and rewrite the store
-            ObjectNode root = Store.obj(Store.read("users.json"));
-            boolean[] found = {false};
-            Iterator<Map.Entry<String, JsonNode>> it = root.fields();
-            while (it.hasNext()) {
-                Map.Entry<String, JsonNode> e = it.next();
-                JsonNode u = e.getValue();
-                if (u.path("id").asText().equals(userId) && u instanceof ObjectNode un) {
-                    found[0] = true;
-                    if (!role.isEmpty()) un.put("role", role);
-                    if (!status.isEmpty()) un.put("status", status);
-                    un.put("updated", java.time.Instant.now().toString());
-                    break;
+            // (atomic read-modify-write under Store's monitor)
+            synchronized (Store.class) {
+                ObjectNode root = Store.obj(Store.read("users.json"));
+                boolean[] found = {false};
+                Iterator<Map.Entry<String, JsonNode>> it = root.fields();
+                while (it.hasNext()) {
+                    Map.Entry<String, JsonNode> e = it.next();
+                    JsonNode u = e.getValue();
+                    if (u.path("id").asText().equals(userId) && u instanceof ObjectNode un) {
+                        found[0] = true;
+                        if (!role.isEmpty()) un.put("role", role);
+                        if (!status.isEmpty()) un.put("status", status);
+                        un.put("updated", java.time.Instant.now().toString());
+                        break;
+                    }
                 }
+                if (!found[0]) throw new IllegalArgumentException("user not found");
+                Store.write("users.json", root);
             }
-            if (!found[0]) throw new IllegalArgumentException("user not found");
-            Store.write("users.json", root);
         }
         AuditService.log(actor.id(), actor.email(), "admin_user_updated", userId, req);
         return getUser(actor, userId);

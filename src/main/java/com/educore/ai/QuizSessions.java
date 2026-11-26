@@ -70,7 +70,9 @@ public final class QuizSessions {
      * Scores a session's answers server-side, records every response for
      * analytics, nudges revision items, and returns score + per-question review.
      */
-    public static ObjectNode submit(String sessionId, JsonNode answers, AuthService.AuthUser user) {
+    // synchronized: the submitted-check + result-cache must be atomic or two
+    // concurrent submits could both score and duplicate responses
+    public static synchronized ObjectNode submit(String sessionId, JsonNode answers, AuthService.AuthUser user) {
         ObjectNode root = Store.obj(Store.read("quiz_sessions.json"));
         JsonNode sessionNode = root.path(sessionId);
         if (sessionNode.isMissingNode() || !(sessionNode instanceof ObjectNode)) {

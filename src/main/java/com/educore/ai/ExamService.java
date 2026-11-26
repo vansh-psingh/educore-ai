@@ -107,7 +107,9 @@ public final class ExamService {
 
     // ---------- submit ----------
 
-    public static ObjectNode submit(String id, JsonNode answers, AuthService.AuthUser user) {
+    // synchronized: the submitted-check + result-cache must be atomic or two
+    // concurrent submits could both score and duplicate attempts/responses
+    public static synchronized ObjectNode submit(String id, JsonNode answers, AuthService.AuthUser user) {
         ObjectNode examsRoot = Store.obj(Store.read("exams.json"));
         JsonNode examNode = examsRoot.path(id);
         if (examNode.isMissingNode() || !(examNode instanceof ObjectNode)) {
