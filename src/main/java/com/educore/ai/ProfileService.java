@@ -4,6 +4,9 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 
+import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
@@ -34,6 +37,106 @@ public final class ProfileService {
 
     private static final String[] FIELDS = {
             "gender", "age", "qualification", "course", "academic_year"};
+
+    // ================= avatar =================
+
+    private static final Path AVATAR_DIR = Path.of("data", "avatars");
+    private static final long MAX_AVATAR_BYTES = 2L * 1024 * 1024; // 2 MB
+
+    /** Small record for a stored avatar image. */
+    public record Avatar(byte[] data, String contentType, String fileName) {
+    }
+
+    /** Validates + stores an uploaded avatar; returns the fresh profile state. */
+    public static ObjectNode saveAvatar(AuthService.AuthUser user, byte[] data)
+            throws Exception {
+        if (data == null || data.length == 0)
+            throw new IllegalArgumentException("No image data received.");
+        if (data.length > MAX_AVATAR_BYTES)
+            throw new IllegalArgumentException("Image is too large (max 2 MB).");
+        String ext = detectImageType(data);
+        if (ext == null)
+            throw new IllegalArgumentException("Unsupported image type. Use PNG, JPEG or WebP.");
+
+        JsonNode u = findUser(user.id());
+        if (u == null) throw new IllegalArgumentException("Account not found.");
+        ObjectNode un = (ObjectNode) u.deepCopy();
+
+        // remove any previous avatar file(s) for this user, then write new
+        deleteAvatarFiles(user.id());
+        Files.createDirectories(AVATAR_DIR);
+        String fileName = user.id() + "." + ext;
+        Files.write(AVATAR_DIR.resolve(fileName), data);
+
+        un.put("avatar", fileName);
+        un.put("avatar_updated", Instant.now().toString());
+        persistUser(un);
+        AuditService.log(user.id(), user.email(), "avatar_updated", user.id());
+        return get(user);
+    }
+
+    /** Loads the user's avatar image, or null when none is set. */
+    public static Avatar loadAvatar(AuthService.AuthUser user) {
+        try {
+            JsonNode u = findUser(user.id());
+            if (u == null) return null;
+            String name = u.path("avatar").asText("");
+            // only ever serve files named "<userid>.<ext>" inside AVATAR_DIR
+            if (!name.matches(java.util.regex.Pattern.quote(user.id()) + "\\.(png|jpe?g|webp)"))
+                return null;
+            Path p = AVATAR_DIR.resolve(name).normalize();
+            if (!p.startsWith(AVATAR_DIR.normalize()) || !Files.isRegularFile(p)) return null;
+            byte[] data = Files.readAllBytes(p);
+            String ct = name.endsWith(".png") ? "image/png"
+                    : name.endsWith(".webp") ? "image/webp" : "image/jpeg";
+            return new Avatar(data, ct, name);
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
+    /** Removes the user's avatar; keeps all other profile data intact. */
+    public static ObjectNode removeAvatar(AuthService.AuthUser user) throws Exception {
+        JsonNode u = findUser(user.id());
+        if (u == null) throw new IllegalArgumentException("Account not found.");
+        ObjectNode un = (ObjectNode) u.deepCopy();
+        deleteAvatarFiles(user.id());
+        un.remove("avatar");
+        un.put("avatar_updated", Instant.now().toString());
+        persistUser(un);
+        AuditService.log(user.id(), user.email(), "avatar_removed", user.id());
+        return get(user);
+    }
+
+    /** Detects PNG/JPEG/WebP by magic bytes; returns file extension or null. */
+    private static String detectImageType(byte[] d) {
+        if (d.length > 8 && (d[0] & 0xFF) == 0x89 && d[1] == 'P' && d[2] == 'N' && d[3] == 'G')
+            return "png";
+        if (d.length > 3 && (d[0] & 0xFF) == 0xFF && (d[1] & 0xFF) == 0xD8 && (d[2] & 0xFF) == 0xFF)
+            return "jpg";
+        if (d.length > 12 && d[0] == 'R' && d[1] == 'I' && d[2] == 'F' && d[3] == 'F'
+                && d[8] == 'W' && d[9] == 'E' && d[10] == 'B' && d[11] == 'P')
+            return "webp";
+        return null;
+    }
+
+    private static void deleteAvatarFiles(String userId) {
+        try {
+            if (!Files.isDirectory(AVATAR_DIR)) return;
+            try (var stream = Files.list(AVATAR_DIR)) {
+                for (Path p : stream.filter(f -> f.getFileName().toString().startsWith(userId + ".")).toList())
+                    Files.deleteIfExists(p);
+            }
+        } catch (IOException ignored) {
+        }
+    }
+
+    /** Writes a mutated user record back into users.json (keyed by email). */
+    private static void persistUser(ObjectNode un) {
+        ObjectNode root = Store.obj(Store.read("users.json"));
+        root.set(un.path("email").asText().toLowerCase(), un);
+        Store.write("users.json", root);
+    }
 
     private ProfileService() {
     }
@@ -69,6 +172,7 @@ public final class ProfileService {
         opts.set("academic_year", MAPPER.valueToTree(new ArrayList<>(ACADEMIC_YEARS)));
         opts.set("courses", MAPPER.valueToTree(courses()));
         out.set("options", opts);
+        out.put("has_avatar", u != null && u.hasNonNull("avatar"));
         return out;
     }
 
@@ -96,10 +200,7 @@ public final class ProfileService {
         }
 
         un.put("profile_updated", Instant.now().toString());
-        // saveUser is keyed by email - write back through users.json root
-        ObjectNode root = Store.obj(Store.read("users.json"));
-        root.set(un.path("email").asText().toLowerCase(), un);
-        Store.write("users.json", root);
+        persistUser(un);
         AuditService.log(user.id(), user.email(), "profile_updated", user.id());
         return get(user);
     }

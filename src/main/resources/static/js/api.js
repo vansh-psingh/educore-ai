@@ -105,6 +105,33 @@ const API = {
   authChangePassword(p) { return this.post("/api/auth/change-password", p); },
   async profile() { return this.get("/api/profile"); },
   profileUpdate(p) { return this.post("/api/profile", p); },
+
+  // avatar: binary upload/download (not JSON)
+  async profileAvatarBlob() {
+    const res = await fetch(API_BASE + "/api/profile/avatar",
+      { credentials: "include", headers: authHeaders() });
+    if (res.status === 404 || res.status === 401) return null;
+    if (!res.ok) throw new Error("Could not load photo.");
+    return res.blob();
+  },
+  async profileAvatarUpload(file) {
+    const res = await fetch(API_BASE + "/api/profile/avatar", {
+      method: "POST", credentials: "include",
+      headers: { "Content-Type": file.type || "application/octet-stream", ...authHeaders() },
+      body: file
+    });
+    const data = await res.json().catch(() => null);
+    if (!res.ok) throw new Error(data?.error || "Upload failed.");
+    return data;
+  },
+  async profileAvatarRemove() {
+    const res = await fetch(API_BASE + "/api/profile/avatar", {
+      method: "DELETE", credentials: "include", headers: authHeaders()
+    });
+    const data = await res.json().catch(() => null);
+    if (!res.ok) throw new Error(data?.error || "Could not remove photo.");
+    return data;
+  },
   async authMe() {
     const res = await fetch(API_BASE + "/api/auth/me", { credentials: "include", headers: authHeaders() });
     if (res.status === 401) onUnauthorized();

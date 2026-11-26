@@ -71,8 +71,39 @@ function renderProfile() {
   if (nameEl) nameEl.textContent = u ? u.name : "Guest";
   if (roleEl) roleEl.textContent = u ? u.role : "signed out";
   const initial = ((u && u.name) || "S").trim().charAt(0).toUpperCase() || "S";
-  document.querySelectorAll(".avatar").forEach(a => { a.textContent = initial; });
+  document.querySelectorAll(".avatar").forEach(a => {
+    a.textContent = initial;
+    a.style.backgroundImage = state.avatarUrl ? `url(${state.avatarUrl})` : "";
+  });
+  refreshAvatar();
   updateAdminNav();
+}
+
+/** Fetches the user's avatar once and applies it to every .avatar element. */
+async function refreshAvatar() {
+  if (!state.user) {
+    if (state.avatarUrl) { URL.revokeObjectURL(state.avatarUrl); state.avatarUrl = null; }
+    document.querySelectorAll(".avatar").forEach(a => { a.style.backgroundImage = ""; });
+    return;
+  }
+  try {
+    const blob = await API.profileAvatarBlob();
+    if (state.avatarUrl) URL.revokeObjectURL(state.avatarUrl);
+    state.avatarUrl = blob ? URL.createObjectURL(blob) : null;
+    const initial = ((state.user.name) || "S").trim().charAt(0).toUpperCase() || "S";
+    document.querySelectorAll(".avatar").forEach(a => {
+      a.textContent = state.avatarUrl ? "" : initial;
+      a.style.backgroundImage = state.avatarUrl ? `url(${state.avatarUrl})` : "";
+    });
+    // keep the settings preview in sync if it's on screen
+    const pv = document.getElementById("pfAvatarImg");
+    if (pv) {
+      pv.src = state.avatarUrl || "";
+      pv.style.display = state.avatarUrl ? "block" : "none";
+    }
+    const iv = document.getElementById("pfAvatarInitial");
+    if (iv) iv.style.display = state.avatarUrl ? "none" : "";
+  } catch (e) { /* keep initials on failure */ }
 }
 
 /** Shows the Admin link only for admin-role users (real page, /admin). */
@@ -438,6 +469,21 @@ async function loadProfileForm() {
     </div>`;
 
   box.innerHTML = `
+    <div class="pf-avatar-row">
+      <div class="pf-avatar" id="pfAvatarWrap">
+        <img id="pfAvatarImg" alt="Profile photo" style="display:none">
+        <span id="pfAvatarInitial">${esc(((state.user && state.user.name) || "S").trim().charAt(0).toUpperCase())}</span>
+      </div>
+      <div>
+        <div style="font-weight:600;margin-bottom:4px">Profile photo</div>
+        <div class="muted" style="font-size:12px;margin-bottom:10px">Optional - PNG, JPEG or WebP, max 2 MB.</div>
+        <div style="display:flex;gap:8px;flex-wrap:wrap">
+          <button class="btn btn-ghost" id="pfAvatarPick" type="button">${p.has_avatar ? "Change photo" : "Upload photo"}</button>
+          ${p.has_avatar ? '<button class="btn btn-ghost" id="pfAvatarRemove" type="button">Remove</button>' : ""}
+        </div>
+        <input type="file" id="pfAvatarFile" accept="image/png,image/jpeg,image/webp" hidden>
+      </div>
+    </div>
     <div class="ins-comp" style="margin-bottom:14px">
       <div class="ins-comp-top"><span>Profile completion</span><strong>${p.completion_pct}%</strong></div>
       <div class="ins-bar"><div class="ins-bar-fill" style="width:${p.completion_pct}%"></div></div>
@@ -489,6 +535,46 @@ async function loadProfileForm() {
       errBox.textContent = e.message;
       btn.disabled = false; btn.textContent = "Save profile";
     }
+  });
+
+  refreshAvatar();
+
+  // show cached avatar immediately if we already have it
+  if (state.avatarUrl) {
+    const avImg = document.getElementById("pfAvatarImg");
+    avImg.src = state.avatarUrl; avImg.style.display = "block";
+    document.getElementById("pfAvatarInitial").style.display = "none";
+  }
+
+  // ---------- avatar upload / remove ----------
+  const fileInput = document.getElementById("pfAvatarFile");
+  document.getElementById("pfAvatarPick").addEventListener("click", () => fileInput.click());
+  fileInput.addEventListener("change", async () => {
+    const f = fileInput.files && fileInput.files[0];
+    fileInput.value = "";
+    if (!f) return;
+    if (f.size > 2 * 1024 * 1024) { toast("Image is too large (max 2 MB)."); return; }
+    if (!["image/png", "image/jpeg", "image/webp"].includes(f.type)) {
+      toast("Use a PNG, JPEG or WebP image."); return;
+    }
+    try {
+      toast("Uploading photo...");
+      await API.profileAvatarUpload(f);
+      toast("Photo updated.");
+      await refreshAvatar();
+      loadProfileForm();
+    } catch (e) {
+      toast(e.message || "Upload failed.");
+    }
+  });
+  const rmBtn = document.getElementById("pfAvatarRemove");
+  if (rmBtn) rmBtn.addEventListener("click", async () => {
+    try {
+      await API.profileAvatarRemove();
+      toast("Photo removed.");
+      await refreshAvatar();
+      loadProfileForm();
+    } catch (e) { toast(e.message || "Could not remove photo."); }
   });
 }
 

@@ -160,7 +160,36 @@ public final class WebServer {
             cors(exchange);
             AuthService.AuthUser authUser = requireUser(exchange);
             if (authUser == null) return;
+            String path = exchange.getRequestURI().getPath();
             try {
+                if (path.endsWith("/avatar")) {
+                    // avatar image upload / fetch / removal
+                    if ("GET".equals(exchange.getRequestMethod())) {
+                        ProfileService.Avatar av = ProfileService.loadAvatar(authUser);
+                        if (av == null) {
+                            send(exchange, 404, "{\"error\":\"no avatar\"}", "application/json");
+                            return;
+                        }
+                        exchange.getResponseHeaders().set("Content-Type", av.contentType());
+                        exchange.getResponseHeaders().set("Cache-Control", "private, max-age=60");
+                        exchange.sendResponseHeaders(200, av.data().length);
+                        try (OutputStream os = exchange.getResponseBody()) { os.write(av.data()); }
+                    } else if ("POST".equals(exchange.getRequestMethod())) {
+                        byte[] data = exchange.getRequestBody().readAllBytes();
+                        ObjectNode resp = ProfileService.saveAvatar(authUser, data);
+                        send(exchange, 200, MAPPER.writeValueAsString(resp), "application/json; charset=UTF-8");
+                    } else if ("DELETE".equals(exchange.getRequestMethod())) {
+                        ObjectNode resp = ProfileService.removeAvatar(authUser);
+                        send(exchange, 200, MAPPER.writeValueAsString(resp), "application/json; charset=UTF-8");
+                    } else {
+                        send(exchange, 405, "{\"error\":\"method not allowed\"}", "application/json");
+                    }
+                    return;
+                }
+                if (!"/api/profile".equals(path)) {
+                    send(exchange, 404, "{\"error\":\"not found\"}", "application/json");
+                    return;
+                }
                 if ("GET".equals(exchange.getRequestMethod())) {
                     send(exchange, 200, MAPPER.writeValueAsString(ProfileService.get(authUser)),
                             "application/json; charset=UTF-8");
