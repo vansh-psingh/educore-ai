@@ -71,18 +71,26 @@ public final class QuizSessions {
      * analytics, nudges revision items, and returns score + per-question review.
      */
     public static ObjectNode submit(String sessionId, JsonNode answers, AuthService.AuthUser user) {
-        JsonNode session = Store.read("quiz_sessions.json").path(sessionId);
-        if (session.isMissingNode()) {
+        ObjectNode root = Store.obj(Store.read("quiz_sessions.json"));
+        JsonNode sessionNode = root.path(sessionId);
+        if (sessionNode.isMissingNode() || !(sessionNode instanceof ObjectNode)) {
             throw new IllegalArgumentException("quiz session not found or expired");
         }
+        ObjectNode session = (ObjectNode) sessionNode;
         String owner = session.path("owner").asText("");
         if (!owner.isEmpty() && !owner.equals(user.id()) && !"admin".equals(user.role())) {
             throw new IllegalArgumentException("access denied");
+        }
+        if (session.path("submitted").asBoolean(false)) {
+            JsonNode cached = session.path("result");
+            if (cached.isObject()) return (ObjectNode) cached.deepCopy();
+            throw new IllegalArgumentException("quiz already submitted");
         }
 
         int got = 0, total = 0;
         ArrayNode review = MAPPER.createArrayNode();
         ArrayNode recorded = MAPPER.createArrayNode();
+        List<ObjectNode> drafts = new ArrayList<>();
 
         for (JsonNode q : session.path("questions")) {
             int num = q.path("number").asInt();
@@ -106,17 +114,18 @@ public final class QuizSessions {
             r.put("earned", earned);
             r.put("correct", ok);
 
-            // feed analytics pipeline
-            Responses.recordScored(user, "quiz", sessionId, topic,
+            // feed analytics pipeline (batched - one store write for all questions)
+            drafts.add(Responses.draftScored(user, "quiz", sessionId, topic,
                     session.path("subject").asText("General"), type,
                     q.path("question").asText(""), given, correct,
-                    marks, earned, ok);
+                    marks, earned, ok));
             ObjectNode rr = recorded.addObject();
             rr.put("topic", topic);
             rr.put("subject", session.path("subject").asText("General"));
             rr.put("correct_flag", ok ? 1 : 0);
         }
 
+        Responses.flush(drafts);
         List<JsonNode> recList = new ArrayList<>();
         recorded.forEach(recList::add);
         RevisionService.onResponsesRecorded(user, recList);
@@ -127,6 +136,11 @@ public final class QuizSessions {
         out.put("score", pct);
         out.put("marks", got + "/" + total);
         out.set("review", review);
+
+        // mark submitted + cache result so resubmits are idempotent
+        session.put("submitted", true);
+        session.set("result", out.deepCopy());
+        Store.write("quiz_sessions.json", root);
         return out;
     }
 

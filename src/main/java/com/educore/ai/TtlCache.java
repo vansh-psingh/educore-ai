@@ -50,7 +50,7 @@ public final class TtlCache {
     public void put(String key, String value) {
         if (key == null || value == null) return;
         if (map.size() >= maxSize) evictExpired();
-        if (map.size() >= maxSize) map.clear(); // hard cap fallback
+        if (map.size() >= maxSize) evictBatch(); // bounded fallback - never flush all
         map.put(key, new Entry(value, ttlMs));
     }
 
@@ -75,5 +75,14 @@ public final class TtlCache {
     private void evictExpired() {
         long now = System.currentTimeMillis();
         map.entrySet().removeIf(e -> now > e.getValue().expiresAt);
+    }
+
+    /** Evicts the soonest-to-expire ~10% when still at capacity. */
+    private void evictBatch() {
+        int toRemove = Math.max(1, maxSize / 10);
+        map.entrySet().stream()
+                .sorted(java.util.Comparator.comparingLong(e -> e.getValue().expiresAt))
+                .limit(toRemove)
+                .forEach(e -> map.remove(e.getKey(), e.getValue()));
     }
 }

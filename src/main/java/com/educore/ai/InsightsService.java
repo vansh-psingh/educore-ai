@@ -295,8 +295,11 @@ public final class InsightsService {
         }
         // include planner subjects/topics as pending nodes (real user data)
         JsonNode tasks = Store.read("planner_tasks.json").path("tasks");
+        boolean admin = "admin".equals(user.role());
         if (tasks.isArray()) {
             for (JsonNode t : tasks) {
+                String owner = t.path("owner").asText("");
+                if (!admin && !owner.isEmpty() && !owner.equals(user.id())) continue;
                 String subject = nz(t.path("subject").asText("General"));
                 String title = t.path("title").asText("");
                 if (title.isEmpty()) continue;

@@ -127,18 +127,6 @@ public final class SmsService {
     }
 
     private static String envValue(String key) {
-        String v = System.getenv(key);
-        if (v != null && !v.isBlank()) return v.trim();
-        try {
-            java.nio.file.Path p = java.nio.file.Path.of(".env");
-            if (java.nio.file.Files.isRegularFile(p)) {
-                for (String line : java.nio.file.Files.readAllLines(p)) {
-                    String t = line.trim();
-                    if (t.startsWith(key + "=")) return t.substring(key.length() + 1).trim();
-                }
-            }
-        } catch (java.io.IOException ignored) {
-        }
-        return null;
+        return Env.get(key);
     }
 }

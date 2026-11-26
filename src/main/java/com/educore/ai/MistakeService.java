@@ -33,6 +33,7 @@ public final class MistakeService {
         Map<String, TopicStat> topics = new LinkedHashMap<>();
         Map<String, Integer> errorCounts = new HashMap<>();
         Map<String, Integer> repeatedQuestions = new HashMap<>(); // normalized question -> wrong count
+        Map<String, String> qkeyTopic = new HashMap<>(); // normalized question -> first-seen topic
         int total = 0, correctN = 0;
 
         for (JsonNode r : all) {
@@ -56,6 +57,7 @@ public final class MistakeService {
                 // repeated-mistake detection: same question text wrong again
                 String qkey = normalizeQuestion(r.path("question").asText(""));
                 if (!qkey.isEmpty()) {
+                    qkeyTopic.putIfAbsent(qkey, topic);
                     int c = repeatedQuestions.merge(qkey, 1, Integer::sum);
                     if (c >= 2) ts.repeated++;
                 }
@@ -105,12 +107,7 @@ public final class MistakeService {
                     ObjectNode m = rep.addObject();
                     m.put("question", shorten(e.getKey()));
                     m.put("times_wrong", e.getValue());
-                    String topic = topics.keySet().stream()
-                            .filter(t -> all.stream().anyMatch(r ->
-                                    normalizeQuestion(r.path("question").asText("")).equals(e.getKey())
-                                            && norm(r.path("topic").asText("General")).equals(t)))
-                            .findFirst().orElse("General");
-                    m.put("topic", topic);
+                    m.put("topic", qkeyTopic.getOrDefault(e.getKey(), "General"));
                 });
 
         // ---- recommendations (rule-based) ----

@@ -13,6 +13,10 @@ public final class AIProvider {
     /** Bounded TTL cache; keys are user-scoped so no data leaks across users. */
     private static final TtlCache CACHE = new TtlCache(10 * 60 * 1000, 200);
 
+    /** Shared provider instances - each holds an HttpClient; reuse avoids per-call setup. */
+    private static final GeminiService GEMINI = new GeminiService();
+    private static final OpenAIService OPENAI = new OpenAIService();
+
     private AIProvider() {
     }
 
@@ -39,9 +43,9 @@ public final class AIProvider {
         }
         String text;
         if (isOpenAI()) {
-            text = new OpenAIService().generate(instructions, input);
+            text = OPENAI.generate(instructions, input);
         } else if (isGemini()) {
-            text = new GeminiService().generate(instructions, input);
+            text = GEMINI.generate(instructions, input);
         } else {
             throw new OpenAIService.OpenAIException(503,
                     "AI service is not configured (set OPENAI_API_KEY or GEMINI_API_KEY in .env).");
@@ -86,7 +90,7 @@ public final class AIProvider {
             throws OpenAIService.OpenAIException {
         instructions = withExamples(sessionId, instructions);
         if (isGemini()) {
-            String answer = new GeminiService().generateWithContents(instructions, contentsFor(sessionId, message));
+            String answer = GEMINI.generateWithContents(instructions, contentsFor(sessionId, message));
             ConversationStore.add(sessionId, "user", message);
             ConversationStore.add(sessionId, "model", answer);
             return answer;
@@ -114,7 +118,7 @@ public final class AIProvider {
                 acc.append(t);
                 onDelta.accept(t);
             };
-            new GeminiService().streamWithContents(instructions, contentsFor(sessionId, message), wrapped);
+            GEMINI.streamWithContents(instructions, contentsFor(sessionId, message), wrapped);
             ConversationStore.add(sessionId, "user", message);
             ConversationStore.add(sessionId, "model", acc.toString());
             return;
@@ -144,7 +148,7 @@ public final class AIProvider {
         com.fasterxml.jackson.databind.node.ObjectNode img = parts.addObject();
         img.putObject("inline_data").put("mime_type", mimeType).put("data", base64Image);
 
-        String answer = new GeminiService().generateWithContents(instructions, contents);
+        String answer = GEMINI.generateWithContents(instructions, contents);
         ConversationStore.add(sessionId, "user", "[image] " + (question == null ? "" : question));
         ConversationStore.add(sessionId, "model", answer);
         return answer;
@@ -161,19 +165,7 @@ public final class AIProvider {
     }
 
     private static String envValue(String key) {
-        try {
-            java.nio.file.Path p = java.nio.file.Path.of(".env");
-            if (java.nio.file.Files.isRegularFile(p)) {
-                for (String line : java.nio.file.Files.readAllLines(p)) {
-                    String t = line.trim();
-                    if (t.startsWith(key + "=")) {
-                        return t.substring(key.length() + 1).trim();
-                    }
-                }
-            }
-        } catch (java.io.IOException ignored) {
-        }
-        return null;
+        return Env.get(key);
     }
 
     private static String firstNonBlank(String... vals) {

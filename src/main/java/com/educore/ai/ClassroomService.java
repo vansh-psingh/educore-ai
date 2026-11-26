@@ -65,7 +65,10 @@ public final class ClassroomService {
         ObjectNode cn = (ObjectNode) c;
         ArrayNode members = (ArrayNode) cn.path("members");
         ArrayNode memberIds = cn.has("member_ids") ? (ArrayNode) cn.path("member_ids") : cn.putArray("member_ids");
-        boolean exists = memberIds.toString().contains(user.id());
+        boolean exists = false;
+        for (JsonNode m : memberIds) {
+            if (user.id().equals(m.asText())) { exists = true; break; }
+        }
         if (!exists) {
             members.add(student);
             memberIds.add(user.id());

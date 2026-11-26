@@ -108,13 +108,20 @@ public final class ExamService {
     // ---------- submit ----------
 
     public static ObjectNode submit(String id, JsonNode answers, AuthService.AuthUser user) {
-        JsonNode exam = Store.read("exams.json").path(id);
-        if (exam.isMissingNode()) {
+        ObjectNode examsRoot = Store.obj(Store.read("exams.json"));
+        JsonNode examNode = examsRoot.path(id);
+        if (examNode.isMissingNode() || !(examNode instanceof ObjectNode)) {
             throw new IllegalArgumentException("exam not found: " + id);
         }
+        ObjectNode exam = (ObjectNode) examNode;
         String owner = exam.path("owner").asText("");
         if (!owner.isEmpty() && !owner.equals(user.id()) && !"admin".equals(user.role())) {
             throw new IllegalArgumentException("access denied");
+        }
+        if (exam.path("submitted").asBoolean(false)) {
+            JsonNode cached = exam.path("result");
+            if (cached.isObject()) return (ObjectNode) cached.deepCopy();
+            throw new IllegalArgumentException("exam already submitted");
         }
         JsonNode key = exam.path("key");
         Map<Integer, JsonNode> keyMap = new HashMap<>();
@@ -125,6 +132,7 @@ public final class ExamService {
         int got = 0, total = 0;
         ArrayNode review = MAPPER.createArrayNode();
         java.util.List<JsonNode> recorded = new java.util.ArrayList<>();
+        java.util.List<ObjectNode> drafts = new java.util.ArrayList<>();
         String examSubject = exam.path("subject").asText("General");
         for (JsonNode k : key) {
             int num = k.path("number").asInt();
@@ -181,9 +189,9 @@ public final class ExamService {
                 r.put("note", EssayService.DISCLAIMER);
             }
 
-            // per-question analytics feed (mistake intelligence + revision)
-            Responses.recordScored(user, "exam", id, topic, examSubject, qType,
-                    qText, given, correct, marks, earned, ok);
+            // per-question analytics feed (batched - one store write for all questions)
+            drafts.add(Responses.draftScored(user, "exam", id, topic, examSubject, qType,
+                    qText, given, correct, marks, earned, ok));
             ObjectNode rec = MAPPER.createObjectNode();
             rec.put("topic", topic);
             rec.put("subject", examSubject);
@@ -191,6 +199,7 @@ public final class ExamService {
             recorded.add(rec);
         }
 
+        Responses.flush(drafts);
         RevisionService.onResponsesRecorded(user, recorded);
 
         int pct = total == 0 ? 0 : (int) Math.round(100.0 * got / total);
@@ -220,6 +229,11 @@ public final class ExamService {
         out.put("score", pct);
         out.put("marks", got + "/" + total);
         out.set("review", review);
+
+        // mark submitted + cache result so resubmits are idempotent
+        exam.put("submitted", true);
+        exam.set("result", out.deepCopy());
+        Store.write("exams.json", examsRoot);
         return out;
     }
 

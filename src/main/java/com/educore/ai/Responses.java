@@ -84,30 +84,69 @@ public final class Responses {
                               String topic, String subject, String qType, String question,
                               String given, String correct, int marks, int earned,
                               boolean correctFlag, String errorType) {
+        flush(List.of(draft(user.id(), source, refId, topic, subject, qType, question,
+                given, correct, marks, earned, correctFlag, errorType)));
+    }
+
+    /** Convenience: record + auto-classify in one call. */
+    public static void recordScored(AuthService.AuthUser user, String source, String refId,
+                                    String topic, String subject, String qType, String question,
+                                    String given, String correct, int marks, int earned,
+                                    boolean correctFlag) {
+        record(user, source, refId, topic, subject, qType, question,
+                given, correct, marks, earned, correctFlag,
+                correctFlag ? "correct" : classify(qType, given, correct, false));
+    }
+
+    /** Builds one response node without persisting - for batch submit flows. */
+    public static ObjectNode draftScored(AuthService.AuthUser user, String source, String refId,
+                                         String topic, String subject, String qType, String question,
+                                         String given, String correct, int marks, int earned,
+                                         boolean correctFlag) {
+        return draft(user.id(), source, refId, topic, subject, qType, question,
+                given, correct, marks, earned, correctFlag,
+                correctFlag ? "correct" : classify(qType, given, correct, false));
+    }
+
+    private static ObjectNode draft(String userId, String source, String refId,
+                                    String topic, String subject, String qType, String question,
+                                    String given, String correct, int marks, int earned,
+                                    boolean correctFlag, String errorType) {
+        ObjectNode r = MAPPER.createObjectNode();
+        r.put("id", java.util.UUID.randomUUID().toString().substring(0, 10));
+        r.put("user", userId);
+        r.put("source", source);
+        r.put("ref", refId == null ? "" : refId);
+        r.put("topic", topic == null ? "" : topic);
+        r.put("subject", subject == null ? "" : subject);
+        r.put("type", qType == null ? "" : qType);
+        r.put("question", question == null ? "" : question);
+        r.put("given", given == null ? "" : given);
+        r.put("correct", correct == null ? "" : correct);
+        r.put("marks", marks);
+        r.put("earned", earned);
+        r.put("correct_flag", correctFlag ? 1 : 0);
+        r.put("error_type", errorType == null ? "" : errorType);
+        r.put("created", Instant.now().toString());
+        return r;
+    }
+
+    /**
+     * Persists many drafted responses in ONE store read+write. Exam/quiz
+     * submits call this once instead of rewriting the whole file per question.
+     * Never throws - analytics must not break flows.
+     */
+    public static void flush(List<ObjectNode> drafts) {
+        if (drafts == null || drafts.isEmpty()) return;
         try {
             ObjectNode root = Store.obj(Store.read("attempt_responses.json"));
             ArrayNode items = root.path("items").isArray()
                     ? (ArrayNode) root.path("items") : root.putArray("items");
-            ObjectNode r = items.addObject();
-            r.put("id", java.util.UUID.randomUUID().toString().substring(0, 10));
-            r.put("user", user.id());
-            r.put("source", source);
-            r.put("ref", refId == null ? "" : refId);
-            r.put("topic", topic == null ? "" : topic);
-            r.put("subject", subject == null ? "" : subject);
-            r.put("type", qType == null ? "" : qType);
-            r.put("question", question == null ? "" : question);
-            r.put("given", given == null ? "" : given);
-            r.put("correct", correct == null ? "" : correct);
-            r.put("marks", marks);
-            r.put("earned", earned);
-            r.put("correct_flag", correctFlag ? 1 : 0);
-            r.put("error_type", errorType == null ? "" : errorType);
-            r.put("created", Instant.now().toString());
+            for (ObjectNode r : drafts) items.add(r);
             while (items.size() > KEEP) items.remove(0);
             Store.write("attempt_responses.json", root);
         } catch (Exception e) {
-            System.err.println("[responses] record failed: " + e.getMessage());
+            System.err.println("[responses] flush failed: " + e.getMessage());
         }
     }
 
@@ -121,16 +160,5 @@ public final class Responses {
             if (userId == null || owner.isEmpty() || owner.equals(userId)) out.add(r);
         }
         return out;
-    }
-
-    /** Convenience: record + auto-classify in one call. */
-    public static void recordScored(AuthService.AuthUser user, String source, String refId,
-                                    String topic, String subject, String qType, String question,
-                                    String given, String correct, int marks, int earned,
-                                    boolean correctFlag) {
-        String errorType = correctFlag ? "correct"
-                : classify(qType, given, correct, false);
-        record(user, source, refId, topic, subject, qType, question,
-                given, correct, marks, earned, correctFlag, errorType);
     }
 }

@@ -39,6 +39,9 @@ public final class AuthService {
     private static final long RATE_WINDOW_MS = 60_000;
 
     private static final Map<String, Deque<Long>> HITS = new ConcurrentHashMap<>();
+    private static final int AI_RATE_LIMIT = 30;                 // AI calls per user
+    private static final long AI_RATE_WINDOW_MS = 60_000;
+    private static final Map<String, Deque<Long>> AI_HITS = new ConcurrentHashMap<>();
 
     public record AuthUser(String id, String name, String email, String role) {}
 
@@ -168,6 +171,18 @@ public final class AuthService {
         synchronized (dq) {
             while (!dq.isEmpty() && now - dq.peekFirst() > RATE_WINDOW_MS) dq.pollFirst();
             if (dq.size() >= RATE_LIMIT) return true;
+            dq.addLast(now);
+            return false;
+        }
+    }
+
+    /** Per-user sliding-window limit for AI-cost endpoints (chat, essays, docs, quizzes). */
+    public static boolean aiRateLimited(String userId) {
+        long now = System.currentTimeMillis();
+        Deque<Long> dq = AI_HITS.computeIfAbsent(userId, k -> new ArrayDeque<>());
+        synchronized (dq) {
+            while (!dq.isEmpty() && now - dq.peekFirst() > AI_RATE_WINDOW_MS) dq.pollFirst();
+            if (dq.size() >= AI_RATE_LIMIT) return true;
             dq.addLast(now);
             return false;
         }
@@ -819,18 +834,6 @@ public final class AuthService {
     }
 
     private static String envValue(String key) {
-        try {
-            java.nio.file.Path p = java.nio.file.Path.of(".env");
-            if (java.nio.file.Files.isRegularFile(p)) {
-                for (String line : java.nio.file.Files.readAllLines(p)) {
-                    String t = line.trim();
-                    if (t.startsWith(key + "=")) {
-                        return t.substring(key.length() + 1).trim();
-                    }
-                }
-            }
-        } catch (java.io.IOException ignored) {
-        }
-        return null;
+        return Env.get(key);
     }
 }

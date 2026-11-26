@@ -31,7 +31,7 @@ public final class GeminiService {
 
     public String generate(String instructions, String input) throws OpenAIService.OpenAIException {
         String key = firstNonBlank(System.getenv("GEMINI_API_KEY"), envValue("GEMINI_API_KEY"));
-        String model = firstNonBlank(System.getenv("GEMINI_MODEL"), envValue("GEMINI_MODEL"), "gemini-2.5-flash");
+        String model = geminiModel();
         int maxTokens = OpenAIConfig.get().maxOutputTokens;
         Duration timeout = OpenAIConfig.get().timeout;
 
@@ -209,7 +209,7 @@ public final class GeminiService {
     }
 
     private static String geminiModel() {
-        return firstNonBlank(System.getenv("GEMINI_MODEL"), envValue("GEMINI_MODEL"), "gemini-3.1-flash-lite-preview");
+        return firstNonBlank(System.getenv("GEMINI_MODEL"), envValue("GEMINI_MODEL"), "gemini-2.5-flash");
     }
 
     private void checkStatus(int code, String body) throws OpenAIService.OpenAIException {
@@ -246,19 +246,7 @@ public final class GeminiService {
     }
 
     private static String envValue(String key) {
-        try {
-            java.nio.file.Path p = java.nio.file.Path.of(".env");
-            if (java.nio.file.Files.isRegularFile(p)) {
-                for (String line : java.nio.file.Files.readAllLines(p)) {
-                    String t = line.trim();
-                    if (t.startsWith(key + "=")) {
-                        return t.substring(key.length() + 1).trim();
-                    }
-                }
-            }
-        } catch (java.io.IOException ignored) {
-        }
-        return null;
+        return Env.get(key);
     }
 
     private static String firstNonBlank(String... vals) {

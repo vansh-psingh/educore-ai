@@ -334,7 +334,13 @@ async function uploadDoc(file) {
   status.textContent = "Uploading & extracting text...";
   try {
     const buf = await file.arrayBuffer();
-    const b64 = btoa(String.fromCharCode(...new Uint8Array(buf)));
+    const bytes = new Uint8Array(buf);
+    let bin = "";
+    const CHUNK = 0x2000;
+    for (let i = 0; i < bytes.length; i += CHUNK) {
+      bin += String.fromCharCode.apply(null, bytes.subarray(i, i + CHUNK));
+    }
+    const b64 = btoa(bin);
     await API.docUpload(file.name, b64);
     status.textContent = "Uploaded!";
     toast("Document uploaded: " + file.name);

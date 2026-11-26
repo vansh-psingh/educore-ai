@@ -18,6 +18,7 @@ import java.net.InetSocketAddress;
 import java.nio.charset.StandardCharsets;
 import java.util.HashMap;
 import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.Executors;
 
 /**
@@ -60,8 +61,10 @@ public final class WebServer {
             }
             String path = exchange.getRequestURI().getPath();
             if (path.equals("/") || path.equals("/index.html")) {
+                exchange.getResponseHeaders().set("Cache-Control", "no-cache");
                 serveStatic(exchange, "static/index.html", "text/html; charset=UTF-8");
             } else if (path.equals("/admin") || path.equals("/admin.html")) {
+                exchange.getResponseHeaders().set("Cache-Control", "no-cache");
                 serveStatic(exchange, "static/admin.html", "text/html; charset=UTF-8");
             } else if (path.startsWith("/static/")) {
                 // serve files from classpath static dir; block traversal
@@ -378,6 +381,7 @@ public final class WebServer {
             }
             AuthService.AuthUser authUser = requireUser(exchange);
             if (authUser == null) return;
+            if (requireAiQuota(exchange, authUser)) return;
             try {
                 String body = new String(exchange.getRequestBody().readAllBytes(), StandardCharsets.UTF_8);
                 JsonNode req = MAPPER.readTree(body);
@@ -545,6 +549,7 @@ public final class WebServer {
                 if (!"POST".equals(method)) { send(exchange, 405, "{\"error\":\"method not allowed\"}", "application/json"); return; }
                 JsonNode req = readJson(exchange);
                 if (path.equals("/api/exams/generate")) {
+                    if (requireAiQuota(exchange, authUser)) return;
                     sendJson(exchange, 200, ExamService.generate(req, authUser));
                 } else if (path.startsWith("/api/exams/") && path.endsWith("/submit")) {
                     String id = path.substring("/api/exams/".length(), path.length() - "/submit".length());
@@ -602,10 +607,12 @@ public final class WebServer {
                     }
                     JsonNode req = readJson(exchange);
                     if (action.equals("ask")) {
+                        if (requireAiQuota(exchange, authUser)) return;
                         ObjectNode out = MAPPER.createObjectNode();
                         out.put("answer", DocumentService.ask(id, req.path("question").asText(""), authUser));
                         sendJson(exchange, 200, out);
                     } else if (action.equals("summarize")) {
+                        if (requireAiQuota(exchange, authUser)) return;
                         ObjectNode out = MAPPER.createObjectNode();
                         out.put("answer", DocumentService.summarizeDoc(id, authUser));
                         sendJson(exchange, 200, out);
@@ -642,6 +649,7 @@ public final class WebServer {
                     if (path.equals("/api/planner/tasks")) {
                         sendJson(exchange, 200, PlannerService.create(req, authUser));
                     } else if (path.equals("/api/planner/ai")) {
+                        if (requireAiQuota(exchange, authUser)) return;
                         ObjectNode out = MAPPER.createObjectNode();
                         out.put("schedule", PlannerService.aiGenerate(req));
                         sendJson(exchange, 200, out);
@@ -743,6 +751,7 @@ public final class WebServer {
                     return;
                 }
                 if ("POST".equals(method) && path.equals("/api/essays/evaluate")) {
+                    if (requireAiQuota(exchange, authUser)) return;
                     sendJson(exchange, 200, EssayService.evaluate(readJson(exchange), authUser));
                     return;
                 }
@@ -870,7 +879,17 @@ public final class WebServer {
 
     // ---------- AI endpoints ----------
 
+    /** Returns true (and sends 429) when the user exceeds the AI-call quota. */
+    private static boolean requireAiQuota(HttpExchange exchange, AuthService.AuthUser user) throws IOException {
+        if (AuthService.aiRateLimited(user.id())) {
+            send(exchange, 429, "{\"error\":\"Too many AI requests - please wait a minute and try again.\"}", "application/json");
+            return true;
+        }
+        return false;
+    }
+
     private static void handleAI(HttpExchange exchange, JsonNode prompts, AuthService.AuthUser authUser) throws IOException {
+        if (requireAiQuota(exchange, authUser)) return;
         String path = exchange.getRequestURI().getPath(); // /api/ai/<op>
         String op = path.substring("/api/ai/".length());
         try {
@@ -1174,18 +1193,25 @@ public final class WebServer {
         return "application/octet-stream";
     }
 
+    /** Classpath assets are immutable per deployment - read each file once. */
+    private static final Map<String, byte[]> STATIC_CACHE = new ConcurrentHashMap<>();
+
     private static void serveStatic(HttpExchange exchange, String resource, String contentType) throws IOException {
-        try (InputStream in = WebServer.class.getClassLoader().getResourceAsStream(resource)) {
-            if (in == null) {
-                send(exchange, 404, "{\"error\":\"not found\"}", "application/json");
-                return;
+        byte[] data = STATIC_CACHE.get(resource);
+        if (data == null) {
+            try (InputStream in = WebServer.class.getClassLoader().getResourceAsStream(resource)) {
+                if (in == null) {
+                    send(exchange, 404, "{\"error\":\"not found\"}", "application/json");
+                    return;
+                }
+                data = in.readAllBytes();
             }
-            byte[] data = in.readAllBytes();
-            exchange.getResponseHeaders().set("Content-Type", contentType);
-            exchange.sendResponseHeaders(200, data.length);
-            try (OutputStream os = exchange.getResponseBody()) {
-                os.write(data);
-            }
+            STATIC_CACHE.put(resource, data);
+        }
+        exchange.getResponseHeaders().set("Content-Type", contentType);
+        exchange.sendResponseHeaders(200, data.length);
+        try (OutputStream os = exchange.getResponseBody()) {
+            os.write(data);
         }
     }
 

@@ -36,13 +36,14 @@ public class AssessmentEngine {
         if (facts.isEmpty()) {
             questions.add(fallbackQuestion(topic));
         } else {
-            int perType = Math.max(1, questionCount / Math.max(1, types.size()));
             // round-robin over types, drawing each fact at most once
             List<Fact> pool = new ArrayList<>(facts);
             List<QuestionType> order = new ArrayList<>(types);
-            for (int i = 0; questions.size() < questionCount && !pool.isEmpty(); i++) {
+            // builders can return null without consuming a fact - cap total
+            // iterations so a stubborn type mix cannot loop forever
+            int maxIter = questionCount * Math.max(1, order.size()) * 3 + order.size();
+            for (int i = 0; questions.size() < questionCount && !pool.isEmpty() && i < maxIter; i++) {
                 QuestionType type = order.get(i % order.size());
-                if (i / order.size() >= perType) break;
                 Question q = switch (type) {
                     case MCQ -> buildDefinitionMcq(facts, pool, difficulty);
                     case TRUE_FALSE -> buildTrueFalse(facts, pool);
