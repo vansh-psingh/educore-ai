@@ -583,6 +583,70 @@ svg { flex-shrink: 0; }
   *, *::before, *::after { animation-duration: .01ms !important; transition-duration: .01ms !important; }
 }
 
+/* ============ ENHANCEMENTS ============ */
+
+/* skeleton shimmer (loading placeholders) */
+.skel {
+  border-radius: 8px;
+  background: linear-gradient(90deg, var(--border) 25%, var(--card-hover) 50%, var(--border) 75%);
+  background-size: 200% 100%;
+  animation: skelShimmer 1.4s infinite;
+}
+.skel-line { height: 14px; margin: 10px 0; }
+@keyframes skelShimmer { from { background-position: 200% 0; } to { background-position: -200% 0; } }
+
+/* study streak chip (overview) */
+.streak-chip {
+  display: inline-flex; align-items: center; gap: 8px;
+  margin-top: 12px; padding: 7px 14px;
+  border-radius: 999px; font-size: 13px;
+  background: var(--grad-soft); border: 1px solid rgba(139,92,246,.35);
+  color: var(--text);
+}
+.streak-chip svg { width: 16px; height: 16px; color: #fbbf24; }
+.streak-chip strong { color: #fbbf24; }
+.streak-sub { color: var(--text-2); font-size: 12px; }
+
+/* recent activity rows */
+.act-row {
+  display: flex; align-items: center; gap: 10px;
+  padding: 9px 6px; border-radius: 10px; text-decoration: none; color: var(--text);
+}
+.act-row:hover { background: var(--card-hover); }
+.act-ic {
+  width: 30px; height: 30px; border-radius: 8px; flex-shrink: 0;
+  display: flex; align-items: center; justify-content: center;
+  background: var(--grad-soft); color: var(--cyan);
+}
+.act-ic svg { width: 15px; height: 15px; }
+.act-txt { flex: 1; font-size: 13px; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.act-date { font-size: 11px; flex-shrink: 0; }
+
+/* global search dropdown */
+.search-box { position: relative; }
+.gs-drop {
+  position: absolute; top: calc(100% + 8px); right: 0;
+  width: 320px; max-width: 90vw; z-index: 60;
+  background: var(--card); border: 1px solid var(--border);
+  border-radius: 14px; padding: 6px;
+  box-shadow: 0 12px 40px rgba(0,0,0,.35);
+}
+.gs-item { display: flex; align-items: center; gap: 10px; }
+.gs-ic {
+  width: 30px; height: 30px; border-radius: 8px; flex-shrink: 0;
+  display: flex; align-items: center; justify-content: center;
+  background: var(--grad-soft); color: var(--purple);
+}
+.gs-ic svg { width: 15px; height: 15px; }
+.gs-txt { font-size: 13px; }
+
+/* keyboard focus visibility */
+:focus-visible {
+  outline: 2px solid var(--purple);
+  outline-offset: 2px;
+  border-radius: 6px;
+}
+
 /* ============ RESPONSIVE ============ */
 @media (max-width: 900px) {
   #sidebar {

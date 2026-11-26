@@ -82,6 +82,14 @@ public final class PlannerService {
                         else tn.put(f, patch.path(f).asText());
                     }
                 }
+                // track completion timestamps for the activity streak
+                String st = tn.path("status").asText("");
+                if ("done".equals(st) || "completed".equals(st)) {
+                    if (!tn.hasNonNull("completed_at"))
+                        tn.put("completed_at", java.time.Instant.now().toString());
+                } else {
+                    tn.remove("completed_at");
+                }
                 save(tasks);
                 return tn;
             }

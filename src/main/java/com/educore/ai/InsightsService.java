@@ -390,6 +390,83 @@ public final class InsightsService {
         return out;
     }
 
+    // ================= study activity / streak =================
+
+    /**
+     * Real activity signal for the dashboard streak card. Dates are collected
+     * (UTC) from every persisted learning artifact owned by the user:
+     * answered questions, exam attempts, saved/updated notes and completed
+     * planner tasks. Streak = consecutive active days ending today or
+     * yesterday (so an off-day doesn't zero the streak until it ends).
+     */
+    public static ObjectNode activity(AuthService.AuthUser user) {
+        java.util.Set<LocalDate> days = new java.util.HashSet<>();
+
+        for (JsonNode r : Responses.forUser(user.id())) {
+            addDay(days, r.path("created").asText(""));
+        }
+
+        JsonNode hist = Store.read("exam_history.json").path("attempts");
+        if (hist.isArray()) {
+            for (JsonNode a : hist) {
+                String owner = a.path("owner").asText("");
+                if (!owner.isEmpty() && !owner.equals(user.id()) && !"admin".equals(user.role())) continue;
+                addDay(days, a.path("date").asText(""));
+            }
+        }
+
+        JsonNode notes = Store.read("notes.json").path("items");
+        if (notes.isArray()) {
+            for (JsonNode n : notes) {
+                String owner = n.path("owner").asText("");
+                if (!owner.isEmpty() && !owner.equals(user.id()) && !"admin".equals(user.role())) continue;
+                addDay(days, n.path("created").asText(""));
+                addDay(days, n.path("updated").asText(""));
+            }
+        }
+
+        JsonNode tasks = Store.read("planner_tasks.json").path("tasks");
+        if (tasks.isArray()) {
+            for (JsonNode t : tasks) {
+                String owner = t.path("owner").asText("");
+                if (!owner.isEmpty() && !owner.equals(user.id()) && !"admin".equals(user.role())) continue;
+                addDay(days, t.path("completed_at").asText(""));
+            }
+        }
+
+        LocalDate today = LocalDate.now(ZoneOffset.UTC);
+        List<LocalDate> sorted = new ArrayList<>(days);
+        sorted.sort(Comparator.reverseOrder());
+
+        int streak = 0;
+        if (!sorted.isEmpty()) {
+            LocalDate cursor = sorted.get(0).equals(today) ? today : today.minusDays(1);
+            // streak only counts if the most recent activity is today or yesterday
+            if (sorted.get(0).equals(today) || sorted.get(0).equals(today.minusDays(1))) {
+                for (LocalDate d : sorted) {
+                    if (d.equals(cursor)) { streak++; cursor = cursor.minusDays(1); }
+                    else if (d.isBefore(cursor)) break;
+                }
+            }
+        }
+
+        ObjectNode out = MAPPER.createObjectNode();
+        out.put("streak_days", streak);
+        out.put("total_active_days", days.size());
+        out.put("active_today", days.contains(today));
+        out.put("last_active",
+                sorted.isEmpty() ? "" : sorted.get(0).toString());
+        return out;
+    }
+
+    private static void addDay(java.util.Set<LocalDate> days, String iso) {
+        if (iso == null || iso.isBlank()) return;
+        try {
+            days.add(Instant.parse(iso).atZone(ZoneOffset.UTC).toLocalDate());
+        } catch (Exception ignored) {
+        }
+    }
+
     private static String nz(String s) {
         String t = s == null ? "" : s.trim();
         return t.isEmpty() ? "General" : t;

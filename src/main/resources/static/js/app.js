@@ -165,13 +165,39 @@ function bindChrome() {
   });
   document.getElementById("profileChip").addEventListener("click", () => location.hash = "#/settings");
 
-  // global search
-  document.getElementById("globalSearch").addEventListener("keydown", e => {
-    if (e.key === "Enter" && e.target.value.trim()) {
-      toast("Global search is coming soon. Try the AI Tutor for answers!");
-      e.target.value = "";
+  // global search: pages + saved notes, debounced dropdown
+  const gs = document.getElementById("globalSearch");
+  let gsTimer = null, gsSeq = 0;
+  const hideGs = () => { const d = document.querySelector(".gs-drop"); if (d) d.remove(); };
+  const gsGo = (target) => {
+    hideGs(); gs.value = "";
+    if (!target) return;
+    if (target.kind === "note") {
+      state.pendingNoteQuery = target.q;
+      location.hash = "#/notes";
+    } else {
+      location.hash = "#/" + target.view;
     }
+  };
+  gs.addEventListener("input", () => {
+    clearTimeout(gsTimer);
+    const q = gs.value.trim();
+    if (q.length < 2) { hideGs(); return; }
+    gsTimer = setTimeout(() => runGlobalSearch(q), 250);
   });
+  gs.addEventListener("keydown", e => {
+    if (e.key === "Enter") {
+      e.preventDefault();
+      const first = document.querySelector(".gs-item");
+      if (first && first._gsTarget) gsGo(first._gsTarget);
+      else if (gs.value.trim().length >= 2) {
+        state.pendingNoteQuery = gs.value.trim();
+        hideGs(); gs.value = "";
+        location.hash = "#/notes";
+      }
+    } else if (e.key === "Escape") { gs.value = ""; hideGs(); }
+  });
+  gs.addEventListener("blur", () => setTimeout(hideGs, 150));
 
   // click outside closes dropdowns
   document.addEventListener("click", e => {
@@ -180,6 +206,49 @@ function bindChrome() {
     }
   });
 }
+
+/* ---------------- global search ---------------- */
+
+async function runGlobalSearch(q) {
+  const box = document.querySelector(".search-box");
+  if (!box) return;
+  hideGsDrop();
+  const lq = q.toLowerCase();
+  const pages = NAV.filter(n => n.view !== "_sep" && n.label.toLowerCase().includes(lq))
+    .slice(0, 4);
+  let notes = [];
+  try { notes = (await API.notes(q)).slice(0, 5); } catch (e) { /* notes optional */ }
+  if (!pages.length && !notes.length) return;
+
+  const dd = document.createElement("div");
+  dd.className = "gs-drop dropdown";
+  const row = (target, iconName, title, sub) => {
+    const el = document.createElement("a");
+    el.className = "dropdown-item gs-item";
+    el.href = "javascript:void(0)";
+    el.innerHTML = `<span class="gs-ic">${icon(iconName)}</span>
+      <span class="gs-txt"><strong>${esc(title)}</strong>${sub ? `<br><span class="muted" style="font-size:11px">${esc(sub)}</span>` : ""}</span>`;
+    el._gsTarget = target;
+    el.addEventListener("mousedown", e => { e.preventDefault(); gsGo(target); });
+    return el;
+  };
+  if (pages.length) {
+    const h = document.createElement("div");
+    h.className = "dropdown-item"; h.style.cssText = "cursor:default;color:var(--text-2);font-size:11px;font-weight:600;letter-spacing:.04em";
+    h.textContent = "PAGES";
+    dd.appendChild(h);
+    pages.forEach(n => dd.appendChild(row({ kind: "page", view: n.view }, n.icon, n.label, "Go to page")));
+  }
+  if (notes.length) {
+    const h = document.createElement("div");
+    h.className = "dropdown-item"; h.style.cssText = "cursor:default;color:var(--text-2);font-size:11px;font-weight:600;letter-spacing:.04em";
+    h.textContent = "NOTES";
+    dd.appendChild(h);
+    notes.forEach(n => dd.appendChild(row({ kind: "note", q }, "notes", n.title, (n.subject || "") + " · " + (n.updated || "").slice(0, 10))));
+  }
+  box.appendChild(dd);
+}
+function hideGsDrop() { const d = document.querySelector(".gs-drop"); if (d) d.remove(); }
 
 function openMobileNav() {
   document.getElementById("sidebar").classList.add("open");
@@ -211,7 +280,7 @@ function toggleTheme() {
 /** Pulls the saved theme from the student profile (server is source of truth). */
 async function applyServerTheme() {
   try {
-    const p = await API.profile();
+    const p = await getProfile();
     if ((p.theme === "dark" || p.theme === "light")
         && p.theme !== document.documentElement.dataset.theme) {
       setTheme(p.theme, false);
@@ -232,7 +301,18 @@ function copyText(text, label) {
 }
 
 function esc(s) {
-  return String(s ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  return String(s ?? "")
+    .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;").replace(/'/g, "&#39;");
+}
+
+// concurrent callers share one profile request; sequential calls refetch
+let _profileInflight = null;
+function getProfile() {
+  if (!_profileInflight) {
+    _profileInflight = API.profile().finally(() => { _profileInflight = null; });
+  }
+  return _profileInflight;
 }
 
 // KaTeX math rendering - works on raw text nodes so multi-line $$ blocks render
@@ -315,7 +395,22 @@ function route() {
 
   const view = document.getElementById("view");
   view.innerHTML = "";
-  VIEWS[state.view](view);
+  try {
+    VIEWS[state.view](view);
+  } catch (e) {
+    console.error("[view] " + state.view + " failed:", e);
+    view.innerHTML = `
+      <div class="view">
+        <div class="card" style="max-width:520px;margin:60px auto;text-align:center">
+          <div class="icon-wrap" style="margin:0 auto 12px">${icon("help")}</div>
+          <h3>Something went wrong</h3>
+          <p class="muted">The ${esc(state.view)} page hit an unexpected error.</p>
+          <button class="btn btn-primary" id="viewRetry">Try again</button>
+        </div>
+      </div>`;
+    const rb = document.getElementById("viewRetry");
+    if (rb) rb.onclick = route;
+  }
   closeMobileNav();
 }
 
@@ -330,6 +425,7 @@ function vOverview(root) {
       <span class="ai-badge">${icon("sparkles")} AI POWERED</span>
       <h2>Welcome back${state.user && state.user.name ? ", " + esc(state.user.name.split(" ")[0]) : ""}!</h2>
       <p>What would you like to learn today?</p>
+      <div id="streakChip" class="streak-chip" style="display:none"></div>
     </div>
 
     <div id="profileNotice"></div>
@@ -359,10 +455,10 @@ function vOverview(root) {
     <div class="grid grid-2" style="margin-top:18px">
       <div class="card">
         <div class="section-title" style="margin-top:0">${icon("clock")} Recent activity</div>
-        <div class="empty-state" style="padding:30px 10px">
-          ${icon("inbox")}
-          <h3>No recent activity</h3>
-          <p>Your AI conversations, notes and quizzes will appear here once you start learning.</p>
+        <div id="recentActivity">
+          <div class="skel skel-line" style="width:80%"></div>
+          <div class="skel skel-line" style="width:65%"></div>
+          <div class="skel skel-line" style="width:72%"></div>
         </div>
       </div>
       <div class="card" id="progressCard">
@@ -434,6 +530,54 @@ function vOverview(root) {
   });
 
   loadProfileNotice();
+  loadOverviewExtras();
+}
+
+/** Streak chip + real recent-activity feed on the overview page. */
+async function loadOverviewExtras() {
+  const chip = document.getElementById("streakChip");
+  const actBox = document.getElementById("recentActivity");
+  const [act, exams, notes, tasks] = await Promise.all([
+    API.insightsActivity().catch(() => null),
+    API.examHistory().catch(() => []),
+    API.notes("", "updated").catch(() => []),
+    API.plannerTasks().catch(() => []),
+  ]);
+
+  if (chip && act) {
+    const n = act.streak_days || 0;
+    chip.style.display = "";
+    chip.innerHTML = `${icon("award")}<span><strong>${n}</strong> day streak</span>
+      <span class="streak-sub">${act.active_today ? "Active today - keep it up!" : "Study today to start a streak"}</span>`;
+  }
+
+  if (!actBox) return;
+  const items = [];
+  (Array.isArray(exams) ? exams : []).forEach(a => items.push({
+    d: a.date, icon: "exams", view: "exams",
+    txt: `Completed exam “${a.title || "Untitled"}” — scored ${a.score ?? "-"}%`
+  }));
+  (Array.isArray(notes) ? notes : []).forEach(n => items.push({
+    d: n.updated || n.created, icon: "notes", view: "notes",
+    txt: `Note “${n.title || "Untitled"}”`
+  }));
+  (Array.isArray(tasks) ? tasks : []).forEach(t => {
+    if (t.completed_at) items.push({
+      d: t.completed_at, icon: "planner", view: "planner",
+      txt: `Completed task “${t.title || "Untitled"}”`
+    });
+  });
+  items.sort((a, b) => String(b.d || "").localeCompare(String(a.d || "")));
+  const top = items.slice(0, 6);
+  actBox.innerHTML = top.length ? top.map(i => `
+    <a class="act-row" href="#/${i.view}">
+      <span class="act-ic">${icon(i.icon)}</span>
+      <span class="act-txt">${esc(i.txt)}</span>
+      <span class="act-date muted">${esc((i.d || "").slice(0, 10))}</span>
+    </a>`).join("")
+    : `<div class="empty-state" style="padding:30px 10px">${icon("inbox")}
+       <h3>No recent activity</h3>
+       <p>Your AI conversations, notes and quizzes will appear here once you start learning.</p></div>`;
 }
 
 /* ---------- student profile (mandatory fields) ---------- */
@@ -448,7 +592,7 @@ async function loadProfileNotice() {
   const box = document.getElementById("profileNotice");
   if (!box) return;
   try {
-    const p = await API.profile();
+    const p = await getProfile();
     if (p.complete) return;
     const names = (p.missing || []).map(f => PROFILE_LABELS[f] || f);
     box.innerHTML = `
@@ -470,7 +614,7 @@ async function loadProfileForm() {
   const box = document.getElementById("profileCard");
   if (!box) return;
   let p;
-  try { p = await API.profile(); }
+  try { p = await getProfile(); }
   catch (e) { box.innerHTML = `<div class="muted">Profile unavailable.</div>`; return; }
 
   const prof = p.profile || {};
@@ -1194,6 +1338,10 @@ function renderNotesHistory(pane) {
   document.getElementById("nhSearch").addEventListener("input", reload);
   document.getElementById("nhSort").addEventListener("change", reload);
   document.getElementById("nhRefresh").addEventListener("click", reload);
+  if (state.pendingNoteQuery) {
+    document.getElementById("nhSearch").value = state.pendingNoteQuery;
+    state.pendingNoteQuery = null;
+  }
   loadNotesList();
 }
 
@@ -1753,7 +1901,7 @@ function initNotifPrefs() {
   let prefs = defaults;
   try { prefs = { ...defaults, ...JSON.parse(localStorage.getItem(LS_KEY) || "{}") }; } catch {}
   apply(prefs);
-  API.profile().then(r => {
+  getProfile().then(r => {
     const sp = r && r.notification_prefs;
     if (sp && typeof sp === "object") {
       prefs = apply(sp);

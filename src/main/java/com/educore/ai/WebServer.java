@@ -468,6 +468,9 @@ public final class WebServer {
                 } else if (path.endsWith("/map") && "GET".equals(method)) {
                     send(exchange, 200, MAPPER.writeValueAsString(InsightsService.conceptMap(authUser)),
                             "application/json; charset=UTF-8");
+                } else if (path.endsWith("/activity") && "GET".equals(method)) {
+                    send(exchange, 200, MAPPER.writeValueAsString(InsightsService.activity(authUser)),
+                            "application/json; charset=UTF-8");
                 } else if (path.endsWith("/revision") && "GET".equals(method)) {
                     int seeded = RevisionService.seedFromWeakTopics(authUser);
                     ObjectNode resp = RevisionService.dashboard(authUser);

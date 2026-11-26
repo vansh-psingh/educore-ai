@@ -297,6 +297,7 @@ const API = {
   async insightsDNA() { return this.get("/api/insights/dna"); },
   async insightsMap() { return this.get("/api/insights/map"); },
   async insightsRevision() { return this.get("/api/insights/revision"); },
+  async insightsActivity() { return this.get("/api/insights/activity"); },
   insightsRevisionReview(id, quality) { return this.post("/api/insights/revision/review", { id, quality }); },
   insightsRevisionMark(id) { return this.post("/api/insights/revision/mark", { id }); },
   insightsRevisionPlanner(id) { return this.post("/api/insights/revision/planner", { id }); },
