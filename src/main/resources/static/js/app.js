@@ -50,7 +50,7 @@ function init() {
   window.addEventListener("hashchange", route);
   // auth gate: resolve session before routing
   API.authMe()
-    .then(u => { state.user = u; })
+    .then(u => { state.user = u; if (u) applyServerTheme(); })
     .catch(() => { state.user = null; })
     .finally(() => { renderProfile(); route(); });
 
@@ -190,12 +190,33 @@ function closeMobileNav() {
   document.getElementById("sidebarOverlay").classList.remove("show");
 }
 
+/** Applies a theme everywhere: DOM, topbar icon, localStorage, profile. */
+function setTheme(t, persistServer = true) {
+  if (t !== "dark" && t !== "light") return;
+  document.documentElement.dataset.theme = t;
+  const tb = document.getElementById("themeBtn");
+  if (tb) tb.innerHTML = icon(t === "dark" ? "moon" : "sun");
+  try { localStorage.setItem("educore-theme", t); } catch (e) {}
+  document.querySelectorAll("#themeSeg .seg-btn").forEach(b =>
+    b.classList.toggle("active", b.dataset.t === t));
+  if (persistServer && state.user) {
+    API.profileUpdate({ theme: t }).catch(() => {});
+  }
+}
+
 function toggleTheme() {
-  const html = document.documentElement;
-  const next = html.dataset.theme === "dark" ? "light" : "dark";
-  html.dataset.theme = next;
-  document.getElementById("themeBtn").innerHTML = icon(next === "dark" ? "moon" : "sun");
-  localStorage.setItem("educore-theme", next);
+  setTheme(document.documentElement.dataset.theme === "dark" ? "light" : "dark");
+}
+
+/** Pulls the saved theme from the student profile (server is source of truth). */
+async function applyServerTheme() {
+  try {
+    const p = await API.profile();
+    if ((p.theme === "dark" || p.theme === "light")
+        && p.theme !== document.documentElement.dataset.theme) {
+      setTheme(p.theme, false);
+    }
+  } catch (e) { /* keep local theme on failure */ }
 }
 
 function toast(msg) {
@@ -1594,11 +1615,18 @@ function vSettings(root) {
     <div class="view-header"><h2>Settings</h2><p>Customize your EDUCORE AI experience.</p></div>
     <div class="grid grid-2">
       <div class="card appearance-card">
-        <div class="section-title" style="margin-top:0">${icon("sparkles")} Appearance</div>
-        <p class="muted" style="font-size:12.5px;margin:0 0 10px">Choose how EDUCORE AI looks.</p>
-        <div class="seg" id="themeSeg">
-          <button type="button" class="seg-btn ${theme === "dark" ? "active" : ""}" data-t="dark">${icon("moon")} Dark</button>
-          <button type="button" class="seg-btn ${theme === "light" ? "active" : ""}" data-t="light">${icon("sun")} Light</button>
+        <div class="app-row">
+          <div class="app-info">
+            ${icon("sparkles")}
+            <div>
+              <div class="section-title" style="margin:0">Appearance</div>
+              <div class="muted" style="font-size:12px">Pick your theme - applies instantly.</div>
+            </div>
+          </div>
+          <div class="seg" id="themeSeg">
+            <button type="button" class="seg-btn ${theme === "dark" ? "active" : ""}" data-t="dark"><span class="sw sw-dark"></span>Dark</button>
+            <button type="button" class="seg-btn ${theme === "light" ? "active" : ""}" data-t="light"><span class="sw sw-light"></span>Light</button>
+          </div>
         </div>
       </div>
       <div class="card">
@@ -1626,13 +1654,7 @@ function vSettings(root) {
 
   document.getElementById("themeSeg").addEventListener("click", e => {
     const btn = e.target.closest(".seg-btn");
-    if (!btn) return;
-    const t = btn.dataset.t;
-    document.documentElement.dataset.theme = t;
-    document.getElementById("themeBtn").innerHTML = icon(t === "dark" ? "moon" : "sun");
-    localStorage.setItem("educore-theme", t);
-    document.querySelectorAll("#themeSeg .seg-btn").forEach(b =>
-      b.classList.toggle("active", b === btn));
+    if (btn) setTheme(btn.dataset.t);
   });
 
   loadProfileForm();
@@ -1773,6 +1795,7 @@ function vLogin(root) {
       const r = await API.authLogin({ email, password, captcha_token: captchaToken });
       state.user = r.user;
       renderProfile();
+      applyServerTheme();
       location.hash = "#/overview";
     } catch (e) {
       err.textContent = e.message;

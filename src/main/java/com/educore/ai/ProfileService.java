@@ -38,6 +38,9 @@ public final class ProfileService {
     private static final String[] FIELDS = {
             "gender", "age", "qualification", "course", "academic_year"};
 
+    /** Optional non-mandatory settings stored on the profile. */
+    private static final Set<String> THEMES = Set.of("dark", "light");
+
     // ================= avatar =================
 
     private static final Path AVATAR_DIR = Path.of("data", "avatars");
@@ -178,6 +181,7 @@ public final class ProfileService {
         out.put("mobile_verified_at",
                 u == null ? "" : u.path("mobile_verified_at").asText(""));
         out.put("mobile_status", MobileService.status(u));
+        out.put("theme", u == null ? "dark" : u.path("theme").asText("dark"));
         return out;
     }
 
@@ -202,6 +206,14 @@ public final class ProfileService {
                 throw new IllegalArgumentException(label(f) + " is required.");
             validate(f, s);
             un.put(f, s);
+        }
+
+        // optional theme preference (not part of mandatory completion)
+        if (req.has("theme")) {
+            String t = req.path("theme").asText("").trim().toLowerCase();
+            if (!THEMES.contains(t))
+                throw new IllegalArgumentException("Theme must be 'dark' or 'light'.");
+            un.put("theme", t);
         }
 
         un.put("profile_updated", Instant.now().toString());
