@@ -70,9 +70,7 @@ public final class WebServer {
                     send(exchange, 404, "{\"error\":\"not found\"}", "application/json");
                     return;
                 }
-                String type = rel.endsWith(".css") ? "text/css; charset=UTF-8"
-                        : rel.endsWith(".js") ? "text/javascript; charset=UTF-8"
-                        : "application/octet-stream";
+                String type = mimeType(rel);
                 exchange.getResponseHeaders().set("Cache-Control", "public, max-age=300");
                 serveStatic(exchange, "static/" + rel, type);
             } else {
@@ -981,6 +979,28 @@ public final class WebServer {
 
     private static String escape(String s) {
         return s == null ? "" : s.replace("\\", "\\\\").replace("\"", "\\\"");
+    }
+
+    private static String mimeType(String rel) {
+        String lower = rel.toLowerCase(java.util.Locale.ROOT);
+        if (lower.endsWith(".css")) return "text/css; charset=UTF-8";
+        if (lower.endsWith(".js") || lower.endsWith(".mjs")) return "text/javascript; charset=UTF-8";
+        if (lower.endsWith(".svg")) return "image/svg+xml";
+        if (lower.endsWith(".png")) return "image/png";
+        if (lower.endsWith(".jpg") || lower.endsWith(".jpeg")) return "image/jpeg";
+        if (lower.endsWith(".gif")) return "image/gif";
+        if (lower.endsWith(".webp")) return "image/webp";
+        if (lower.endsWith(".ico")) return "image/x-icon";
+        if (lower.endsWith(".html") || lower.endsWith(".htm")) return "text/html; charset=UTF-8";
+        if (lower.endsWith(".json") || lower.endsWith(".map")) return "application/json; charset=UTF-8";
+        if (lower.endsWith(".woff2")) return "font/woff2";
+        if (lower.endsWith(".woff")) return "font/woff";
+        if (lower.endsWith(".ttf")) return "font/ttf";
+        if (lower.endsWith(".txt") || lower.endsWith(".md")) return "text/plain; charset=UTF-8";
+        if (lower.endsWith(".mp3")) return "audio/mpeg";
+        if (lower.endsWith(".mp4")) return "video/mp4";
+        if (lower.endsWith(".pdf")) return "application/pdf";
+        return "application/octet-stream";
     }
 
     private static void serveStatic(HttpExchange exchange, String resource, String contentType) throws IOException {
