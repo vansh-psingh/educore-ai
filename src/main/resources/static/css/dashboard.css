@@ -157,6 +157,27 @@ body {
   width: 100%;
 }
 .cp-card .btn { display: flex; justify-content: center; }
+/* dark-themed password inputs matching the rest of Settings */
+.cp-card input[type="password"] {
+  width: 100%; height: 44px; padding: 0 14px;
+  background: rgba(11, 17, 32, .6);
+  border: 1px solid var(--border); border-radius: 10px;
+  color: var(--text); font-size: 14px; outline: none;
+  transition: border-color .18s, box-shadow .18s;
+}
+.cp-card input[type="password"]::placeholder { color: var(--text-2); }
+.cp-card input[type="password"]:focus {
+  border-color: var(--purple);
+  box-shadow: 0 0 0 3px rgba(124, 58, 237, .18);
+}
+/* keep browser autofill dark instead of light-blue */
+.cp-card input[type="password"]:-webkit-autofill,
+.cp-card input[type="password"]:-webkit-autofill:hover,
+.cp-card input[type="password"]:-webkit-autofill:focus {
+  -webkit-text-fill-color: var(--text);
+  -webkit-box-shadow: 0 0 0 1000px rgba(11, 17, 32, .85) inset;
+  transition: background-color 9999s ease-out;
+}
 @media (max-width: 900px) { .settings-cols { flex-direction: column; } .settings-col { width: 100%; flex: none; } }
 .app-row { display: flex; align-items: center; justify-content: space-between; gap: 14px; flex-wrap: wrap; }
 .app-info { display: flex; align-items: center; gap: 10px; min-width: 0; }

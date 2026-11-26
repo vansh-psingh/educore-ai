@@ -1636,8 +1636,8 @@ function vSettings(root) {
       </div>
       <div class="card cp-card">
         <div class="section-title" style="margin-top:0">${icon("settings")} Change password</div>
-        <div class="field"><label>Current password</label><input type="password" id="cpCur"></div>
-        <div class="field"><label>New password</label><input type="password" id="cpNew"></div>
+        <div class="field"><label>Current password</label><input type="password" id="cpCur" placeholder="Enter current password" autocomplete="current-password"></div>
+        <div class="field"><label>New password</label><input type="password" id="cpNew" placeholder="Enter new password" autocomplete="new-password"></div>
         <button class="btn btn-ghost" id="cpGo">Update password</button>
         <div class="auth-ok" id="cpOk"></div>
         <div class="auth-error" id="cpErr"></div>
