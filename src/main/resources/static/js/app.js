@@ -1613,7 +1613,8 @@ function vSettings(root) {
   root.innerHTML = `
   <div class="view">
     <div class="view-header"><h2>Settings</h2><p>Customize your EDUCORE AI experience.</p></div>
-    <div class="grid grid-2">
+    <div class="settings-cols">
+      <div class="settings-col">
       <div class="card appearance-card">
         <div class="app-row">
           <div class="app-info">
@@ -1630,14 +1631,20 @@ function vSettings(root) {
         </div>
       </div>
       <div class="card">
-        <div class="section-title" style="margin-top:0">${icon("users")} Student profile</div>
-        <div id="profileCard"><div class="muted">Loading profile...</div></div>
-      </div>
-      <div class="card">
         <div class="section-title" style="margin-top:0">${icon("bell")} Notifications</div>
         <p class="muted">Study reminders and progress alerts - coming soon. The notifications panel will light up when the backend supports it.</p>
       </div>
       <div class="card">
+        <div class="section-title" style="margin-top:0">${icon("settings")} Privacy</div>
+        <p class="muted">Your data stays local: the backend only reads <code>student_profile.json</code> that you control. AI features send your prompts to OpenAI only when a key is configured - no keys are ever exposed to the browser.</p>
+      </div>
+      </div>
+      <div class="settings-col">
+      <div class="card">
+        <div class="section-title" style="margin-top:0">${icon("users")} Student profile</div>
+        <div id="profileCard"><div class="muted">Loading profile...</div></div>
+      </div>
+      <div class="card cp-card">
         <div class="section-title" style="margin-top:0">${icon("settings")} Change password</div>
         <div class="field"><label>Current password</label><input type="password" id="cpCur"></div>
         <div class="field"><label>New password</label><input type="password" id="cpNew"></div>
@@ -1645,9 +1652,6 @@ function vSettings(root) {
         <div class="auth-ok" id="cpOk"></div>
         <div class="auth-error" id="cpErr"></div>
       </div>
-      <div class="card">
-        <div class="section-title" style="margin-top:0">${icon("settings")} Privacy</div>
-        <p class="muted">Your data stays local: the backend only reads <code>student_profile.json</code> that you control. AI features send your prompts to OpenAI only when a key is configured - no keys are ever exposed to the browser.</p>
       </div>
     </div>
   </div>`;
