@@ -42,13 +42,45 @@ public final class JsonToPostgres {
             if (applied > 0) {
                 System.out.println("[db] applied " + applied + " schema migration(s)");
             }
-            backupStoreDir();
-            migrateAll();
-            migrateDocumentTexts();
-            System.out.println("[db] JSON -> PostgreSQL migration complete (mode=" + Db.mode() + ")");
+            if (!alreadyMigrated()) {
+                backupStoreDir();
+                migrateAll();
+                migrateDocumentTexts();
+                markMigrated();
+                System.out.println("[db] JSON -> PostgreSQL migration complete (mode=" + Db.mode() + ")");
+            }
         } catch (Exception e) {
             System.err.println("[db] migration failed: " + e.getMessage());
             e.printStackTrace(System.err);
+        }
+    }
+
+    /** Sentinel row in schema_migrations recording that JSON data was imported once. */
+    private static final int DATA_MIGRATION_VERSION = 900;
+
+    private static boolean alreadyMigrated() {
+        try (var c = Db.conn();
+             var ps = c.prepareStatement(
+                     "SELECT 1 FROM schema_migrations WHERE version = ?")) {
+            ps.setInt(1, DATA_MIGRATION_VERSION);
+            try (var rs = ps.executeQuery()) {
+                return rs.next();
+            }
+        } catch (Exception e) {
+            return false;
+        }
+    }
+
+    private static void markMigrated() {
+        try (var c = Db.conn();
+             var ps = c.prepareStatement(
+                     "INSERT INTO schema_migrations(version, name) VALUES (?, ?) "
+                             + "ON CONFLICT (version) DO NOTHING")) {
+            ps.setInt(1, DATA_MIGRATION_VERSION);
+            ps.setString(2, "json-data-migration");
+            ps.executeUpdate();
+        } catch (Exception e) {
+            System.err.println("[db] could not record migration marker: " + e.getMessage());
         }
     }
 

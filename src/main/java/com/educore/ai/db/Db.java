@@ -5,6 +5,8 @@ import com.zaxxer.hikari.HikariDataSource;
 
 import java.sql.Connection;
 import java.sql.SQLException;
+import java.util.LinkedHashMap;
+import java.util.Map;
 import java.util.Properties;
 
 /**
@@ -69,33 +71,69 @@ public final class Db {
 
     private static synchronized void ensureInit() {
         if (pool != null || initFailed) return;
-        String url = envValue("DATABASE_URL");
+        String raw = envValue("DATABASE_URL");
         Properties props = new Properties();
+        Map<String, String> dsProps = new LinkedHashMap<>();
 
-        if (url != null && url.startsWith("postgres://")) {
+        if (raw != null && (raw.startsWith("postgres://") || raw.startsWith("postgresql://"))) {
             // Neon/Supabase style: postgres://user:pass@host:port/db?params
-            url = "jdbc:postgresql://" + url.substring("postgres://".length());
-        }
-        if (url != null && url.startsWith("postgresql://")) {
-            url = "jdbc:postgresql://" + url.substring("postgresql://".length());
-        }
-        if (url != null && url.startsWith("jdbc:postgresql://")) {
-            // extract user/password query params into properties
-            int q = url.indexOf('?');
+            String rest = raw.startsWith("postgresql://")
+                    ? raw.substring("postgresql://".length())
+                    : raw.substring("postgres://".length());
+
+            String query = "";
+            int q = rest.indexOf('?');
             if (q >= 0) {
-                String qs = url.substring(q + 1);
-                url = url.substring(0, q);
-                for (String pair : qs.split("&")) {
+                query = rest.substring(q + 1);
+                rest = rest.substring(0, q);
+            }
+
+            int slash = rest.indexOf('/');
+            String authority = slash >= 0 ? rest.substring(0, slash) : rest;
+            String path = slash >= 0 ? rest.substring(slash) : "";
+            if (path.isEmpty()) path = "/postgres";
+
+            int at = authority.lastIndexOf('@');
+            if (at >= 0) {
+                String userinfo = authority.substring(0, at);
+                authority = authority.substring(at + 1);
+                int colon = userinfo.indexOf(':');
+                if (colon >= 0) {
+                    props.setProperty("user", urlDecode(userinfo.substring(0, colon)));
+                    props.setProperty("password", urlDecode(userinfo.substring(colon + 1)));
+                } else {
+                    props.setProperty("user", urlDecode(userinfo));
+                }
+            }
+            jdbcUrl = "jdbc:postgresql://" + authority + path;
+
+            for (String pair : query.split("&")) {
+                int eq = pair.indexOf('=');
+                if (eq <= 0) continue;
+                String k = pair.substring(0, eq);
+                String v = urlDecode(pair.substring(eq + 1));
+                if (k.equals("user")) props.setProperty("user", v);
+                else if (k.equals("password")) props.setProperty("password", v);
+                else if (k.equals("channel_binding")) dsProps.put("channelBinding", v);
+                else if (k.equals("connect_timeout")) dsProps.put("connectTimeout", v);
+                else if (k.equals("application_name")) dsProps.put("ApplicationName", v);
+                else dsProps.put(k, v);
+            }
+        } else if (raw != null && raw.startsWith("jdbc:postgresql://")) {
+            jdbcUrl = raw;
+            int q = raw.indexOf('?');
+            if (q >= 0) {
+                jdbcUrl = raw.substring(0, q);
+                for (String pair : raw.substring(q + 1).split("&")) {
                     int eq = pair.indexOf('=');
                     if (eq <= 0) continue;
                     String k = pair.substring(0, eq);
-                    String v = pair.substring(eq + 1);
+                    String v = urlDecode(pair.substring(eq + 1));
                     if (k.equals("user")) props.setProperty("user", v);
                     else if (k.equals("password")) props.setProperty("password", v);
-                    else props.setProperty("jdbc." + k, v);
+                    else dsProps.put(k, v);
                 }
             }
-            jdbcUrl = url;
         } else {
             String host = envValue("PGHOST");
             if (host == null) { configured = false; return; }
@@ -125,6 +163,7 @@ public final class Db {
             cfg.addDataSourceProperty("sslmode", "prefer");
             cfg.addDataSourceProperty("connectTimeout", "10");
             cfg.addDataSourceProperty("socketTimeout", "60");
+            dsProps.forEach(cfg::addDataSourceProperty);
             pool = new HikariDataSource(cfg);
             configured = true;
         } catch (Exception e) {
@@ -151,6 +190,14 @@ public final class Db {
         } catch (java.io.IOException ignored) {
         }
         return null;
+    }
+
+    private static String urlDecode(String s) {
+        try {
+            return java.net.URLDecoder.decode(s, java.nio.charset.StandardCharsets.UTF_8);
+        } catch (Exception e) {
+            return s;
+        }
     }
 
     private static String firstNonBlank(String... vals) {

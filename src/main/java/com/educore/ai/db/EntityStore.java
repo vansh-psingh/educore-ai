@@ -219,9 +219,14 @@ public final class EntityStore {
                 vals.put(dbCol, v.isNumber() ? v.asInt() : (v.asText("").isBlank() ? null : Integer.parseInt(v.asText())));
             } else {
                 String s = v.isTextual() || v.isNumber() || v.isBoolean() ? v.asText("") : "";
-                // FK owner columns: blank -> NULL so rows without owners still insert
-                if ((dbCol.equals("owner_id") || dbCol.equals("user_id")) && s.isEmpty()) s = null;
-                vals.put(dbCol, s.isEmpty() && !v.isTextual() && !v.isNumber() && !v.isBoolean() ? null : s);
+                boolean missing = s.isEmpty() && !v.isTextual() && !v.isNumber() && !v.isBoolean();
+                // FK columns: blank/missing -> NULL so rows without owners still insert
+                if ((dbCol.equals("owner_id") || dbCol.equals("user_id") || dbCol.equals("exam_id"))
+                        && s.isEmpty()) {
+                    vals.put(dbCol, null);
+                } else {
+                    vals.put(dbCol, missing ? null : s);
+                }
             }
         }
 
@@ -236,7 +241,11 @@ public final class EntityStore {
         for (int i = 0; i < cols.size(); i++) {
             if (i > 0) { sql.append(','); ph.append(','); }
             sql.append(cols.get(i));
-            ph.append(cols.get(i).equals("payload") ? "?::jsonb" : "?");
+            String colName = cols.get(i);
+            ph.append(colName.equals("payload") ? "?::jsonb"
+                    : colName.equals("created_at") || colName.equals("updated_at")
+                            ? "COALESCE(?::timestamptz, now())"
+                    : colName.endsWith("_at") ? "?::timestamptz" : "?");
         }
         sql.append(") VALUES (").append(ph).append(") ON CONFLICT (id) DO UPDATE SET ");
         List<String> updates = new ArrayList<>();
@@ -250,8 +259,20 @@ public final class EntityStore {
             for (int i = 0; i < cols.size(); i++) {
                 String col = cols.get(i);
                 Object v = col.equals("id") ? id : col.equals("payload") ? vals.get("payload") : vals.get(col);
-                if (v == null) ps.setNull(i + 1, java.sql.Types.VARCHAR);
-                else if (v instanceof Integer iv) ps.setInt(i + 1, iv);
+                if (v == null) {
+                    // FK columns stay NULL; NOT NULL typed columns get type-appropriate
+                    // empty defaults (payload jsonb remains the source of truth on read)
+                    if (col.equals("owner_id") || col.equals("user_id") || col.equals("exam_id")) {
+                        ps.setNull(i + 1, java.sql.Types.VARCHAR);
+                    } else if (spec.intColumns().contains(col)) {
+                        if (col.equals("size_bytes")) ps.setLong(i + 1, 0);
+                        else ps.setInt(i + 1, 0);
+                    } else if (col.endsWith("_at")) {
+                        ps.setNull(i + 1, java.sql.Types.VARCHAR);
+                    } else {
+                        ps.setString(i + 1, "");
+                    }
+                } else if (v instanceof Integer iv) ps.setInt(i + 1, iv);
                 else ps.setString(i + 1, v.toString());
             }
             ps.executeUpdate();

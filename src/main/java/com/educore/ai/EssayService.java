@@ -351,7 +351,7 @@ public final class EssayService {
                            (id, user_id, exam_id, question, answer, subject, level,
                             max_marks, rubric, evaluation, status, final_marks,
                             final_feedback, reviewed_by, created_at, updated_at)
-                         VALUES (?,?,?,?,?,?,?,?::jsonb,?::jsonb,?,?,?,?,?,?)
+                         VALUES (?,?,?,?,?,?,?,?::jsonb,?::jsonb,?,?,?,?,?,?::timestamptz,?::timestamptz)
                          ON CONFLICT (id) DO UPDATE SET
                            evaluation = EXCLUDED.evaluation,
                            status = EXCLUDED.status,
