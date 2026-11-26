@@ -801,3 +801,54 @@ input[type="date"]:focus, .pw-wrap input:focus {
 .ins-rev-actions { display: flex; gap: 6px; flex-wrap: wrap; }
 .ins-legend { display: flex; gap: 16px; font-size: 12px; color: var(--muted); margin: 6px 0 10px; }
 .ins-legend i { display: inline-block; width: 9px; height: 9px; border-radius: 50%; margin-right: 5px; }
+
+/* ================= AUTH INPUTS (premium login fields) ================= */
+/* Scoped to .auth-card so dashboard forms are untouched. Covers ALL input
+   types - email/password previously fell back to unstyled browser defaults. */
+.auth-card .field { margin-bottom: 18px; }
+.auth-card .field label {
+  font-size: 12.5px; font-weight: 600; color: var(--text-2);
+  margin-bottom: 8px; text-transform: none; letter-spacing: .2px;
+}
+.auth-card .field input {
+  width: 100%; height: 56px; padding: 0 16px;
+  background: rgba(8,13,27,.55);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  color: var(--text); font-size: 15.5px; font-family: inherit;
+  transition: border-color .18s, box-shadow .18s, background .18s;
+}
+.auth-card .field input::placeholder {
+  color: rgba(148,163,184,.55); font-size: 14px;
+}
+.auth-card .field input[type="email"],
+.auth-card .pw-wrap input {
+  padding-left: 46px;
+  background-repeat: no-repeat;
+  background-position: 16px center;
+  background-size: 18px;
+}
+.auth-card .field input[type="email"] {
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='18' height='18' viewBox='0 0 24 24' fill='none' stroke='%2364748b' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Crect x='2' y='4' width='20' height='16' rx='2'/%3E%3Cpath d='m22 7-8.97 5.7a1.94 1.94 0 0 1-2.06 0L2 7'/%3E%3C/svg%3E");
+}
+.auth-card .pw-wrap input {
+  padding-right: 60px;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='18' height='18' viewBox='0 0 24 24' fill='none' stroke='%2364748b' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Crect x='3' y='11' width='18' height='11' rx='2'/%3E%3Cpath d='M7 11V7a5 5 0 0 1 10 0v4'/%3E%3C/svg%3E");
+}
+.auth-card .field input:focus {
+  outline: none;
+  border-color: var(--purple);
+  background: rgba(8,13,27,.85);
+  box-shadow: 0 0 0 3px rgba(139,92,246,.22), 0 0 0 1px rgba(59,130,246,.35);
+}
+.auth-card .pw-toggle {
+  right: 14px; font-size: 13px; font-weight: 600;
+  padding: 8px 4px; border-radius: 6px;
+}
+.auth-card .pw-toggle:hover { color: var(--text); }
+.auth-card .btn { height: 54px; font-size: 15px; font-weight: 700; }
+.auth-card .auth-error, .auth-card .auth-ok { font-size: 13.5px; }
+@media (max-width: 640px) {
+  .auth-card .field input { font-size: 16px; } /* prevents iOS zoom */
+  .auth-card { padding: 30px 20px; }
+}
