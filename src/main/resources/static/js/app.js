@@ -468,6 +468,17 @@ async function loadProfileForm() {
       <div class="pf-err" id="pferr_${id}"></div>
     </div>`;
 
+  // split stored E.164 mobile into country code + national number
+  const MOB_CC = ["+91", "+971", "+44", "+1", "+65", "+61", "+81"];
+  let mobCc = "+91", mobNum = "";
+  const rawMob = p.mobile || "";
+  if (rawMob.startsWith("+")) {
+    const hit = MOB_CC.filter(c => rawMob.startsWith(c)).sort((a, b) => b.length - a.length)[0];
+    if (hit) { mobCc = hit; mobNum = rawMob.slice(hit.length); }
+    else mobNum = rawMob.slice(1);
+  }
+  const mobStatus = p.mobile_status || "none";
+
   box.innerHTML = `
     <div class="pf-avatar-row">
       <div class="pf-avatar" id="pfAvatarWrap">
@@ -499,6 +510,17 @@ async function loadProfileForm() {
       <input type="text" id="pf_course" list="pf_courses" value="${esc(prof.course || "")}" placeholder="e.g. B.Tech">
       <datalist id="pf_courses">${(opt.courses || []).map(c => `<option value="${esc(c)}">`).join("")}</datalist>
       <div class="pf-err" id="pferr_course"></div>
+    </div>
+    <div class="field"><label>Mobile number</label>
+      <div class="mob-row">
+        <select id="pf_cc" class="mob-cc">
+          ${[["+91","India"],["+1","US/Canada"],["+44","UK"],["+971","UAE"],["+65","Singapore"],["+61","Australia"],["+81","Japan"]]
+            .map(([c, n]) => `<option value="${c}" ${mobCc === c ? "selected" : ""}>${c} ${n}</option>`).join("")}
+        </select>
+        <input type="tel" id="pf_mobile" class="mob-num" placeholder="98765 43210" value="${esc(mobNum)}" inputmode="numeric">
+      </div>
+      <div class="pf-err" id="pferr_mobile"></div>
+      <div id="mobBox"></div>
     </div>
     <div class="auth-error" id="pfErr" style="margin:4px 0"></div>
     <button class="btn btn-primary" id="pfSave">Save profile</button>`;
@@ -576,6 +598,92 @@ async function loadProfileForm() {
       loadProfileForm();
     } catch (e) { toast(e.message || "Could not remove photo."); }
   });
+
+  // ---------- mobile number + SMS OTP ----------
+  const mobBox = document.getElementById("mobBox");
+  const mobChip = st => st === "verified"
+    ? '<span class="chip" style="color:#4ade80;border-color:rgba(74,222,128,.4)">Verified</span>'
+    : st === "pending"
+      ? '<span class="chip" style="color:#fbbf24;border-color:rgba(251,191,36,.4)">Verification pending</span>'
+      : '<span class="chip">Not verified</span>';
+
+  mobBox.innerHTML = `
+    <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin:8px 0">
+      ${mobChip(mobStatus)}
+      <button class="btn btn-ghost" id="mobSaveNum" type="button" style="padding:6px 14px;font-size:12.5px">Save number</button>
+    </div>
+    ${rawMob && mobStatus !== "verified" ? `<button class="btn btn-primary" id="mobSendOtp" type="button" style="padding:6px 14px;font-size:12.5px">${mobStatus === "pending" ? "Resend OTP" : "Send OTP"}</button>` : ""}
+    ${mobStatus === "pending" ? `
+      <div class="mob-otp-row" style="display:flex;gap:8px;margin-top:10px;max-width:340px">
+        <input type="text" id="mobOtp" maxlength="6" inputmode="numeric" placeholder="6-digit code" style="flex:1">
+        <button class="btn btn-primary" id="mobVerify" type="button">Verify</button>
+      </div>` : ""}
+    <div class="auth-error" id="mobErr" style="margin:4px 0"></div>`;
+
+  const mobErr = () => document.getElementById("mobErr");
+
+  document.getElementById("mobSaveNum").addEventListener("click", async () => {
+    mobErr().textContent = "";
+    document.getElementById("pferr_mobile").textContent = "";
+    const cc = document.getElementById("pf_cc").value;
+    const num = (document.getElementById("pf_mobile").value || "").replace(/[^\d]/g, "");
+    if (!num) { document.getElementById("pferr_mobile").textContent = "Enter your mobile number."; return; }
+    try {
+      await API.mobileSave({ country_code: cc, mobile: num });
+      toast("Mobile number saved.");
+      loadProfileForm();
+      loadProfileNotice();
+    } catch (e) {
+      document.getElementById("pferr_mobile").textContent = e.message;
+    }
+  });
+
+  const sendBtn = document.getElementById("mobSendOtp");
+  if (sendBtn) sendBtn.addEventListener("click", async () => {
+    mobErr().textContent = "";
+    sendBtn.disabled = true;
+    try {
+      const r = await API.mobileOtpSend();
+      toast("Verification code sent.");
+      loadProfileForm();
+      startResendCooldown();
+    } catch (e) {
+      mobErr().textContent = e.message;
+      sendBtn.disabled = false;
+    }
+  });
+
+  const verifyBtn = document.getElementById("mobVerify");
+  if (verifyBtn) verifyBtn.addEventListener("click", async () => {
+    mobErr().textContent = "";
+    const otp = (document.getElementById("mobOtp").value || "").trim();
+    if (!/^\d{6}$/.test(otp)) { mobErr().textContent = "Enter the 6-digit code."; return; }
+    verifyBtn.disabled = true;
+    try {
+      await API.mobileOtpVerify({ otp });
+      toast("Mobile number verified!");
+      loadProfileForm();
+      loadProfileNotice();
+    } catch (e) {
+      mobErr().textContent = e.message;
+      verifyBtn.disabled = false;
+    }
+  });
+
+  // 60s resend cooldown on the button label
+  function startResendCooldown() {
+    let left = 60;
+    const tick = () => {
+      const b = document.getElementById("mobSendOtp");
+      if (!b) return;
+      if (left <= 0) { b.disabled = false; b.textContent = "Resend OTP"; return; }
+      b.disabled = true;
+      b.textContent = `Resend OTP (${left}s)`;
+      left--;
+      setTimeout(tick, 1000);
+    };
+    tick();
+  }
 }
 
 /* ---------- AI Tutor (chat) ---------- */
@@ -1485,13 +1593,12 @@ function vSettings(root) {
   <div class="view">
     <div class="view-header"><h2>Settings</h2><p>Customize your EDUCORE AI experience.</p></div>
     <div class="grid grid-2">
-      <div class="card">
+      <div class="card appearance-card">
         <div class="section-title" style="margin-top:0">${icon("sparkles")} Appearance</div>
-        <div class="field"><label>Theme</label>
-          <select id="setTheme">
-            <option value="dark" ${theme === "dark" ? "selected" : ""}>Dark (default)</option>
-            <option value="light" ${theme === "light" ? "selected" : ""}>Light</option>
-          </select>
+        <p class="muted" style="font-size:12.5px;margin:0 0 10px">Choose how EDUCORE AI looks.</p>
+        <div class="seg" id="themeSeg">
+          <button type="button" class="seg-btn ${theme === "dark" ? "active" : ""}" data-t="dark">${icon("moon")} Dark</button>
+          <button type="button" class="seg-btn ${theme === "light" ? "active" : ""}" data-t="light">${icon("sun")} Light</button>
         </div>
       </div>
       <div class="card">
@@ -1517,10 +1624,15 @@ function vSettings(root) {
     </div>
   </div>`;
 
-  document.getElementById("setTheme").addEventListener("change", e => {
-    document.documentElement.dataset.theme = e.target.value;
-    document.getElementById("themeBtn").innerHTML = icon(e.target.value === "dark" ? "moon" : "sun");
-    localStorage.setItem("educore-theme", e.target.value);
+  document.getElementById("themeSeg").addEventListener("click", e => {
+    const btn = e.target.closest(".seg-btn");
+    if (!btn) return;
+    const t = btn.dataset.t;
+    document.documentElement.dataset.theme = t;
+    document.getElementById("themeBtn").innerHTML = icon(t === "dark" ? "moon" : "sun");
+    localStorage.setItem("educore-theme", t);
+    document.querySelectorAll("#themeSeg .seg-btn").forEach(b =>
+      b.classList.toggle("active", b === btn));
   });
 
   loadProfileForm();

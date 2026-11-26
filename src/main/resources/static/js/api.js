@@ -132,6 +132,11 @@ const API = {
     if (!res.ok) throw new Error(data?.error || "Could not remove photo.");
     return data;
   },
+
+  // mobile number + SMS OTP verification
+  mobileSave(p) { return this.post("/api/profile/mobile", p); },
+  mobileOtpSend() { return this.post("/api/profile/mobile/otp", {}); },
+  mobileOtpVerify(p) { return this.post("/api/profile/mobile/verify", p); },
   async authMe() {
     const res = await fetch(API_BASE + "/api/auth/me", { credentials: "include", headers: authHeaders() });
     if (res.status === 401) onUnauthorized();

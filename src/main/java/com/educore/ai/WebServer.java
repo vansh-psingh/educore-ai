@@ -186,6 +186,26 @@ public final class WebServer {
                     }
                     return;
                 }
+                if (path.endsWith("/mobile") || path.endsWith("/mobile/otp")
+                        || path.endsWith("/mobile/verify")) {
+                    // mobile number save + SMS OTP verification
+                    String body = new String(exchange.getRequestBody().readAllBytes(),
+                            StandardCharsets.UTF_8);
+                    JsonNode req = body.isBlank() ? MAPPER.createObjectNode() : MAPPER.readTree(body);
+                    String clientIp = exchange.getRemoteAddress() != null
+                            ? exchange.getRemoteAddress().getAddress().getHostAddress() : "";
+                    ObjectNode resp;
+                    if (path.endsWith("/mobile/otp")) {
+                        resp = MobileService.requestOtp(authUser, clientIp);
+                    } else if (path.endsWith("/mobile/verify")) {
+                        resp = MobileService.verifyOtp(authUser, req);
+                    } else {
+                        resp = MobileService.saveMobile(authUser, req);
+                    }
+                    send(exchange, 200, MAPPER.writeValueAsString(resp),
+                            "application/json; charset=UTF-8");
+                    return;
+                }
                 if (!"/api/profile".equals(path)) {
                     send(exchange, 404, "{\"error\":\"not found\"}", "application/json");
                     return;

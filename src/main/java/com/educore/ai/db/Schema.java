@@ -314,6 +314,23 @@ public final class Schema {
                     );
                     CREATE INDEX IF NOT EXISTS idx_otp_user   ON otp_codes(user_id);
                     CREATE INDEX IF NOT EXISTS idx_otp_expiry ON otp_codes(expires_at);
+                    """),
+            new Migration(4, "mobile-verification", """
+                    -- ============ SMS OTP codes for mobile verification ============
+                    CREATE TABLE IF NOT EXISTS mobile_otps (
+                        id          bigserial PRIMARY KEY,
+                        user_id     text NOT NULL REFERENCES app_users(id) ON DELETE CASCADE,
+                        mobile      text NOT NULL,
+                        otp_hash    text NOT NULL,
+                        expires_at  timestamptz NOT NULL,
+                        attempts    int NOT NULL DEFAULT 0,
+                        used_at     timestamptz,
+                        created_ip  text,
+                        created_at  timestamptz NOT NULL DEFAULT now()
+                    );
+                    CREATE INDEX IF NOT EXISTS idx_motp_user   ON mobile_otps(user_id);
+                    CREATE INDEX IF NOT EXISTS idx_motp_mobile ON mobile_otps(mobile);
+                    CREATE INDEX IF NOT EXISTS idx_motp_expiry ON mobile_otps(expires_at);
                     """)
     );
 

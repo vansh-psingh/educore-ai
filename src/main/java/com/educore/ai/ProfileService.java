@@ -132,7 +132,7 @@ public final class ProfileService {
     }
 
     /** Writes a mutated user record back into users.json (keyed by email). */
-    private static void persistUser(ObjectNode un) {
+    static void persistUser(ObjectNode un) {
         ObjectNode root = Store.obj(Store.read("users.json"));
         root.set(un.path("email").asText().toLowerCase(), un);
         Store.write("users.json", root);
@@ -173,6 +173,11 @@ public final class ProfileService {
         opts.set("courses", MAPPER.valueToTree(courses()));
         out.set("options", opts);
         out.put("has_avatar", u != null && u.hasNonNull("avatar"));
+        // mobile verification (private - owner only, via this authenticated endpoint)
+        out.put("mobile", u == null ? "" : u.path("mobile").asText(""));
+        out.put("mobile_verified_at",
+                u == null ? "" : u.path("mobile_verified_at").asText(""));
+        out.put("mobile_status", MobileService.status(u));
         return out;
     }
 
@@ -272,7 +277,7 @@ public final class ProfileService {
         return (int) Math.round(100.0 * ok / FIELDS.length);
     }
 
-    private static JsonNode findUser(String userId) {
+    static JsonNode findUser(String userId) {
         JsonNode users = Store.read("users.json");
         var it = users.fields();
         while (it.hasNext()) {

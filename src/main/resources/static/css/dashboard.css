@@ -144,6 +144,23 @@ body {
   border: 2px solid rgba(139,92,246,.35);
 }
 .pf-avatar img { width: 100%; height: 100%; object-fit: cover; display: block; }
+
+/* compact appearance + mobile fields */
+.appearance-card { padding: 16px 18px !important; }
+.appearance-card .section-title { font-size: 14px; margin-bottom: 2px; }
+.seg { display: inline-flex; background: rgba(148,163,184,.12); border: 1px solid var(--border); border-radius: 10px; padding: 3px; gap: 2px; }
+.seg-btn {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 7px 16px; border: none; border-radius: 8px; cursor: pointer;
+  background: transparent; color: var(--text-2); font-size: 13px; font-weight: 600;
+  transition: background .15s, color .15s;
+}
+.seg-btn svg { width: 15px; height: 15px; }
+.seg-btn:hover { color: var(--text); }
+.seg-btn.active { background: var(--grad); color: #fff; box-shadow: 0 2px 8px rgba(139,92,246,.35); }
+.mob-row { display: flex; gap: 8px; }
+.mob-cc { flex: 0 0 170px; }
+.mob-num { flex: 1; min-width: 0; }
 .avatar-sm { width: 32px; height: 32px; font-size: 12px; }
 
 /* ============ TOPBAR ============ */

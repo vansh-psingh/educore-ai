@@ -75,7 +75,7 @@ public final class AuthService {
 
     // ================= tokens (JWT-compatible HS256) =================
 
-    private static byte[] secret() {
+    static byte[] secret() {
         String s = firstNonBlank(System.getenv("AUTH_SECRET"), envValue("AUTH_SECRET"));
         if (s == null || s.isBlank()) {
             // dev fallback: persisted random secret so restarts keep sessions valid
