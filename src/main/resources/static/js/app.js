@@ -280,6 +280,8 @@ function vOverview(root) {
       <p>What would you like to learn today?</p>
     </div>
 
+    <div id="profileNotice"></div>
+
     <div class="grid grid-4" id="quickCards"></div>
 
     <div class="card ask-panel">
@@ -377,6 +379,116 @@ function vOverview(root) {
        <span class="muted">Based on your recorded quiz history in student_profile.json</span>`;
   }).catch(() => {
     document.getElementById("progressSummary").textContent = "Learning report unavailable.";
+  });
+
+  loadProfileNotice();
+}
+
+/* ---------- student profile (mandatory fields) ---------- */
+
+const PROFILE_LABELS = {
+  gender: "Gender", age: "Age", qualification: "Qualification",
+  course: "Course", academic_year: "Academic year"
+};
+
+/** Non-blocking completion notice on the overview page. */
+async function loadProfileNotice() {
+  const box = document.getElementById("profileNotice");
+  if (!box) return;
+  try {
+    const p = await API.profile();
+    if (p.complete) return;
+    const names = (p.missing || []).map(f => PROFILE_LABELS[f] || f);
+    box.innerHTML = `
+      <div class="card" style="border-left:3px solid var(--purple);margin-bottom:18px">
+        <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">
+          <div class="icon-wrap" style="background:rgba(139,92,246,.15);color:#a78bfa;width:38px;height:38px">${icon("users")}</div>
+          <div style="flex:1;min-width:200px">
+            <strong>Complete your student profile</strong>
+            <div class="muted" style="font-size:12.5px">${p.completion_pct}% complete - missing: ${esc(names.join(", "))}</div>
+          </div>
+          <a class="btn btn-ghost" href="#/settings">Complete now</a>
+        </div>
+      </div>`;
+  } catch (e) { /* profile endpoint unavailable - stay silent */ }
+}
+
+/** Settings -> profile form with per-field validation. */
+async function loadProfileForm() {
+  const box = document.getElementById("profileCard");
+  if (!box) return;
+  let p;
+  try { p = await API.profile(); }
+  catch (e) { box.innerHTML = `<div class="muted">Profile unavailable.</div>`; return; }
+
+  const prof = p.profile || {};
+  const opt = p.options || {};
+  const sel = (id, label, options, val, ph) => `
+    <div class="field"><label>${label} <span style="color:#f87171">*</span></label>
+      <select id="pf_${id}">
+        <option value="">${ph || "Select..."}</option>
+        ${(options || []).map(o => `<option ${o === val ? "selected" : ""}>${esc(o)}</option>`).join("")}
+      </select>
+      <div class="pf-err" id="pferr_${id}"></div>
+    </div>`;
+  const txt = (id, label, val, ph, type, extra) => `
+    <div class="field"><label>${label} <span style="color:#f87171">*</span></label>
+      <input type="${type || "text"}" id="pf_${id}" value="${esc(val || "")}" placeholder="${esc(ph || "")}" ${extra || ""}>
+      <div class="pf-err" id="pferr_${id}"></div>
+    </div>`;
+
+  box.innerHTML = `
+    <div class="ins-comp" style="margin-bottom:14px">
+      <div class="ins-comp-top"><span>Profile completion</span><strong>${p.completion_pct}%</strong></div>
+      <div class="ins-bar"><div class="ins-bar-fill" style="width:${p.completion_pct}%"></div></div>
+      ${(p.missing || []).length ? `<div class="muted" style="font-size:12px;margin-top:6px">Missing: ${(p.missing || []).map(f => PROFILE_LABELS[f] || f).join(", ")}</div>` : '<div class="muted" style="font-size:12px;margin-top:6px;color:#4ade80">All required fields complete.</div>'}
+    </div>
+    <div class="form-grid">
+      ${sel("gender", "Gender", opt.gender, prof.gender)}
+      ${sel("qualification", "Qualification", opt.qualification, prof.qualification)}
+      ${sel("academic_year", "Academic year", opt.academic_year, prof.academic_year)}
+      ${txt("age", "Age", prof.age, "e.g. 20", "number", 'min="13" max="100" step="1"')}
+    </div>
+    <div class="field"><label>Course <span style="color:#f87171">*</span></label>
+      <input type="text" id="pf_course" list="pf_courses" value="${esc(prof.course || "")}" placeholder="e.g. B.Tech">
+      <datalist id="pf_courses">${(opt.courses || []).map(c => `<option value="${esc(c)}">`).join("")}</datalist>
+      <div class="pf-err" id="pferr_course"></div>
+    </div>
+    <div class="auth-error" id="pfErr" style="margin:4px 0"></div>
+    <button class="btn btn-primary" id="pfSave">Save profile</button>`;
+
+  document.getElementById("pfSave").addEventListener("click", async () => {
+    const errBox = document.getElementById("pfErr");
+    errBox.textContent = "";
+    document.querySelectorAll(".pf-err").forEach(e => e.textContent = "");
+    const payload = {};
+    let clientErr = false;
+    for (const f of ["gender", "age", "qualification", "course", "academic_year"]) {
+      const el = document.getElementById("pf_" + f);
+      const v = (el.value || "").trim();
+      const fe = document.getElementById("pferr_" + f);
+      if (!v) { fe.textContent = "This field is required."; clientErr = true; continue; }
+      if (f === "age") {
+        if (!/^\d+$/.test(v) || +v < 13 || +v > 100) {
+          fe.textContent = "Enter a whole number between 13 and 100."; clientErr = true; continue;
+        }
+        payload.age = v;
+      } else {
+        payload[f] = v;
+      }
+    }
+    if (clientErr) return;
+    const btn = document.getElementById("pfSave");
+    btn.disabled = true; btn.textContent = "Saving...";
+    try {
+      const r = await API.profileUpdate(payload);
+      toast(r.complete ? "Profile complete!" : "Profile saved.");
+      loadProfileForm();
+      loadProfileNotice();
+    } catch (e) {
+      errBox.textContent = e.message;
+      btn.disabled = false; btn.textContent = "Save profile";
+    }
   });
 }
 
@@ -1297,8 +1409,8 @@ function vSettings(root) {
         </div>
       </div>
       <div class="card">
-        <div class="section-title" style="margin-top:0">${icon("users")} Profile</div>
-        <p class="muted">Your student record is stored in <code>data/student_profile.json</code> on the backend (name, academic level, subjects, quiz history, study minutes). Edit that file to update it - account management is coming soon.</p>
+        <div class="section-title" style="margin-top:0">${icon("users")} Student profile</div>
+        <div id="profileCard"><div class="muted">Loading profile...</div></div>
       </div>
       <div class="card">
         <div class="section-title" style="margin-top:0">${icon("bell")} Notifications</div>
@@ -1324,6 +1436,8 @@ function vSettings(root) {
     document.getElementById("themeBtn").innerHTML = icon(e.target.value === "dark" ? "moon" : "sun");
     localStorage.setItem("educore-theme", e.target.value);
   });
+
+  loadProfileForm();
 
   document.getElementById("cpGo").addEventListener("click", async () => {
     const ok = document.getElementById("cpOk");

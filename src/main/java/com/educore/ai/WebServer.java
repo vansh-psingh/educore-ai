@@ -155,6 +155,30 @@ public final class WebServer {
         });
 
         // ---------- Feedback ----------
+        server.createContext("/api/profile", exchange -> {
+            if (preflight(exchange)) return;
+            cors(exchange);
+            AuthService.AuthUser authUser = requireUser(exchange);
+            if (authUser == null) return;
+            try {
+                if ("GET".equals(exchange.getRequestMethod())) {
+                    send(exchange, 200, MAPPER.writeValueAsString(ProfileService.get(authUser)),
+                            "application/json; charset=UTF-8");
+                } else if ("POST".equals(exchange.getRequestMethod())) {
+                    String body = new String(exchange.getRequestBody().readAllBytes(), StandardCharsets.UTF_8);
+                    JsonNode req = MAPPER.readTree(body);
+                    ObjectNode resp = ProfileService.update(authUser, req);
+                    send(exchange, 200, MAPPER.writeValueAsString(resp), "application/json; charset=UTF-8");
+                } else {
+                    send(exchange, 405, "{\"error\":\"method not allowed\"}", "application/json");
+                }
+            } catch (IllegalArgumentException e) {
+                send(exchange, 400, "{\"error\":\"" + escape(e.getMessage()) + "\"}", "application/json");
+            } catch (Exception e) {
+                send(exchange, 500, "{\"error\":\"profile request failed\"}", "application/json");
+            }
+        });
+
         server.createContext("/api/feedback", exchange -> {
             if (preflight(exchange)) return;
             cors(exchange);

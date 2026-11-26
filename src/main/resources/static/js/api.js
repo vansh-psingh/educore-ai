@@ -103,6 +103,8 @@ const API = {
   authOtpVerify(p) { return this.post("/api/auth/otp/verify", p); },
   authOtpReset(p) { return this.post("/api/auth/otp/reset", p); },
   authChangePassword(p) { return this.post("/api/auth/change-password", p); },
+  async profile() { return this.get("/api/profile"); },
+  profileUpdate(p) { return this.post("/api/profile", p); },
   async authMe() {
     const res = await fetch(API_BASE + "/api/auth/me", { credentials: "include", headers: authHeaders() });
     if (res.status === 401) onUnauthorized();

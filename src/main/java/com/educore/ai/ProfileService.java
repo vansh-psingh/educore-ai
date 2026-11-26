@@ -1,0 +1,199 @@
+package com.educore.ai;
+
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ObjectNode;
+
+import java.time.Instant;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Set;
+
+/**
+ * Per-user student profile with mandatory fields.
+ *
+ * Stored on the user record inside users.json (round-trips losslessly
+ * through the payload jsonb column in PostgreSQL mode). Validation runs
+ * on BOTH backend (authoritative) and frontend (UX). Incomplete profiles
+ * never block dashboard access - they surface a completion notice.
+ */
+public final class ProfileService {
+
+    private static final ObjectMapper MAPPER = new ObjectMapper();
+
+    public static final Set<String> GENDERS = Set.of(
+            "Male", "Female", "Non-binary", "Prefer not to say");
+    public static final Set<String> QUALIFICATIONS = Set.of(
+            "School Student", "Higher Secondary", "Diploma",
+            "Undergraduate", "Postgraduate", "Other");
+    public static final Set<String> ACADEMIC_YEARS = Set.of(
+            "1st Year", "2nd Year", "3rd Year", "4th Year",
+            "5th Year", "Final Year", "Other / Not Applicable");
+    public static final List<String> DEFAULT_COURSES = List.of(
+            "B.Tech", "BCA", "BBA", "B.Sc", "BA", "MCA", "MBA", "Other");
+
+    private static final String[] FIELDS = {
+            "gender", "age", "qualification", "course", "academic_year"};
+
+    private ProfileService() {
+    }
+
+    /** Course options - configurable via PROFILE_COURSES env (comma-separated). */
+    public static List<String> courses() {
+        String env = envValue("PROFILE_COURSES");
+        if (env == null || env.isBlank()) return DEFAULT_COURSES;
+        List<String> out = new ArrayList<>();
+        for (String c : env.split(",")) {
+            String t = c.trim();
+            if (!t.isEmpty()) out.add(t);
+        }
+        return out.isEmpty() ? DEFAULT_COURSES : out;
+    }
+
+    /** Returns the user's profile fields + completion status. */
+    public static ObjectNode get(AuthService.AuthUser user) {
+        JsonNode u = findUser(user.id());
+        ObjectNode out = MAPPER.createObjectNode();
+        ObjectNode profile = MAPPER.createObjectNode();
+        for (String f : FIELDS) {
+            profile.put(f, u == null ? "" : u.path(f).asText(""));
+        }
+        out.set("profile", profile);
+        out.set("missing", MAPPER.valueToTree(missingFields(profile)));
+        out.put("completion_pct", completionPct(profile));
+        out.put("complete", missingFields(profile).isEmpty());
+        // options for the frontend controls
+        ObjectNode opts = MAPPER.createObjectNode();
+        opts.set("gender", MAPPER.valueToTree(new ArrayList<>(GENDERS)));
+        opts.set("qualification", MAPPER.valueToTree(new ArrayList<>(QUALIFICATIONS)));
+        opts.set("academic_year", MAPPER.valueToTree(new ArrayList<>(ACADEMIC_YEARS)));
+        opts.set("courses", MAPPER.valueToTree(courses()));
+        out.set("options", opts);
+        return out;
+    }
+
+    /**
+     * Validates and persists provided fields. Only supplied fields are
+     * validated+written; omitted fields keep existing values, so partial
+     * updates can never wipe valid data. Returns the fresh profile state.
+     */
+    public static ObjectNode update(AuthService.AuthUser user, JsonNode req) throws Exception {
+        JsonNode u = findUser(user.id());
+        if (u == null) throw new IllegalArgumentException("Account not found.");
+        ObjectNode un = (ObjectNode) u.deepCopy();
+
+        // validate every supplied field BEFORE writing anything;
+        // all five fields are mandatory, so a supplied blank/whitespace
+        // value is rejected rather than silently clearing valid data
+        for (String f : FIELDS) {
+            if (!req.has(f)) continue;
+            JsonNode v = req.get(f);
+            String s = v == null || v.isNull() ? "" : v.asText("").trim();
+            if (s.isEmpty())
+                throw new IllegalArgumentException(label(f) + " is required.");
+            validate(f, s);
+            un.put(f, s);
+        }
+
+        un.put("profile_updated", Instant.now().toString());
+        // saveUser is keyed by email - write back through users.json root
+        ObjectNode root = Store.obj(Store.read("users.json"));
+        root.set(un.path("email").asText().toLowerCase(), un);
+        Store.write("users.json", root);
+        AuditService.log(user.id(), user.email(), "profile_updated", user.id());
+        return get(user);
+    }
+
+    // ================= validation =================
+
+    private static void validate(String field, String value) {
+        if (value.isEmpty()) return; // empty = unset; completion logic handles it
+        switch (field) {
+            case "gender" -> {
+                if (!GENDERS.contains(value))
+                    throw new IllegalArgumentException("Select a valid gender option.");
+            }
+            case "age" -> {
+                if (!value.matches("\\d+"))
+                    throw new IllegalArgumentException("Age must be a whole number between 13 and 100.");
+                int age = Integer.parseInt(value);
+                if (age < 13 || age > 100)
+                    throw new IllegalArgumentException("Age must be between 13 and 100.");
+            }
+            case "qualification" -> {
+                if (!QUALIFICATIONS.contains(value))
+                    throw new IllegalArgumentException("Select a valid qualification.");
+            }
+            case "course" -> {
+                if (value.length() > 60)
+                    throw new IllegalArgumentException("Course name is too long (max 60 characters).");
+            }
+            case "academic_year" -> {
+                if (!ACADEMIC_YEARS.contains(value))
+                    throw new IllegalArgumentException("Select a valid academic year.");
+            }
+            default -> throw new IllegalArgumentException("Unknown profile field: " + field);
+        }
+    }
+
+    private static String label(String field) {
+        return switch (field) {
+            case "gender" -> "Gender";
+            case "age" -> "Age";
+            case "qualification" -> "Qualification";
+            case "course" -> "Course";
+            case "academic_year" -> "Academic year";
+            default -> field;
+        };
+    }
+
+    static List<String> missingFields(JsonNode profile) {
+        List<String> missing = new ArrayList<>();
+        for (String f : FIELDS) {
+            if (!isFieldValid(f, profile.path(f).asText(""))) missing.add(f);
+        }
+        return missing;
+    }
+
+    private static boolean isFieldValid(String field, String value) {
+        if (value == null || value.isBlank()) return false;
+        try {
+            validate(field, value.trim());
+            return !value.trim().isEmpty();
+        } catch (Exception e) {
+            return false;
+        }
+    }
+
+    static int completionPct(JsonNode profile) {
+        int ok = 0;
+        for (String f : FIELDS) if (isFieldValid(f, profile.path(f).asText(""))) ok++;
+        return (int) Math.round(100.0 * ok / FIELDS.length);
+    }
+
+    private static JsonNode findUser(String userId) {
+        JsonNode users = Store.read("users.json");
+        var it = users.fields();
+        while (it.hasNext()) {
+            var e = it.next();
+            if (e.getValue().path("id").asText("").equals(userId)) return e.getValue();
+        }
+        return null;
+    }
+
+    private static String envValue(String key) {
+        String v = System.getenv(key);
+        if (v != null && !v.isBlank()) return v.trim();
+        try {
+            java.nio.file.Path p = java.nio.file.Path.of(".env");
+            if (java.nio.file.Files.isRegularFile(p)) {
+                for (String line : java.nio.file.Files.readAllLines(p)) {
+                    String t = line.trim();
+                    if (t.startsWith(key + "=")) return t.substring(key.length() + 1).trim();
+                }
+            }
+        } catch (java.io.IOException ignored) {
+        }
+        return null;
+    }
+}
