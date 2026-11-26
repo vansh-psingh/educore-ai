@@ -1638,12 +1638,6 @@ function vSettings(root) {
         <div class="section-title" style="margin-top:0">${icon("settings")} Privacy</div>
         <p class="muted">Your data stays local: the backend only reads <code>student_profile.json</code> that you control. AI features send your prompts to OpenAI only when a key is configured - no keys are ever exposed to the browser.</p>
       </div>
-      </div>
-      <div class="settings-col">
-      <div class="card">
-        <div class="section-title" style="margin-top:0">${icon("users")} Student profile</div>
-        <div id="profileCard"><div class="muted">Loading profile...</div></div>
-      </div>
       <div class="card cp-card">
         <div class="section-title" style="margin-top:0">${icon("settings")} Change password</div>
         <div class="field"><label>Current password</label><input type="password" id="cpCur"></div>
@@ -1651,6 +1645,12 @@ function vSettings(root) {
         <button class="btn btn-ghost" id="cpGo">Update password</button>
         <div class="auth-ok" id="cpOk"></div>
         <div class="auth-error" id="cpErr"></div>
+      </div>
+      </div>
+      <div class="settings-col">
+      <div class="card">
+        <div class="section-title" style="margin-top:0">${icon("users")} Student profile</div>
+        <div id="profileCard"><div class="muted">Loading profile...</div></div>
       </div>
       </div>
     </div>

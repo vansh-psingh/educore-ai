@@ -151,7 +151,12 @@ body {
 .settings-cols { display: flex; gap: 24px; align-items: flex-start; flex-wrap: wrap; }
 .settings-col { flex: 1 1 400px; min-width: 0; display: flex; flex-direction: column; gap: 18px; }
 .settings-col > .card { height: fit-content; }
-.settings-col > .cp-card { align-self: center; width: 100%; max-width: 440px; }
+/* change-password: centered, compact form inside the left column */
+.settings-col > .cp-card { max-width: 460px; }
+.cp-card .field, .cp-card .btn, .cp-card .auth-ok, .cp-card .auth-error {
+  max-width: 340px; margin-left: auto; margin-right: auto;
+}
+.cp-card .btn { display: flex; justify-content: center; }
 @media (max-width: 900px) { .settings-cols { flex-direction: column; } .settings-col { width: 100%; flex: none; } }
 .app-row { display: flex; align-items: center; justify-content: space-between; gap: 14px; flex-wrap: wrap; }
 .app-info { display: flex; align-items: center; gap: 10px; min-width: 0; }
