@@ -1374,7 +1374,7 @@ function authShell(inner) {
   <div class="auth-page">
     <div class="auth-card">
       <div class="auth-brand">
-        <img src="/static/assets/logo-full.svg" alt="EDUCORE AI" style="width:230px;max-width:80%;height:auto;display:block;margin:0 auto 14px">
+        <img src="/static/brand/educore-logo.svg" alt="EDUCORE AI" style="width:250px;max-width:85%;height:auto;display:block;margin:0 auto 14px">
         <p class="muted" style="text-align:center;margin-top:4px">Learn Smarter. Understand Deeper.</p>
       </div>
       ${inner}
