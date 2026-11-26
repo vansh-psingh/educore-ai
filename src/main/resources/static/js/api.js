@@ -45,6 +45,13 @@ function clearTokens() {
   try { localStorage.removeItem("educore_at"); localStorage.removeItem("educore_rt"); } catch (e) {}
 }
 
+// terminal 401 (refresh also failed / no session): notify the app to
+// drop auth state and return to the sign-in screen
+function onUnauthorized() {
+  clearTokens();
+  try { window.dispatchEvent(new CustomEvent("educore:unauthorized")); } catch (e) {}
+}
+
 const API = {
   async post(path, body, _retried) {
     let res;
@@ -67,6 +74,7 @@ const API = {
         return this.post(path, body, true);
       } catch (e) { /* fall through to error */ }
     }
+    if (res.status === 401) onUnauthorized();
     const data = await res.json().catch(() => null);
     if (!res.ok) {
       const err = new Error(data?.error || data?.detail || `HTTP ${res.status}`);
@@ -90,6 +98,7 @@ const API = {
   authChangePassword(p) { return this.post("/api/auth/change-password", p); },
   async authMe() {
     const res = await fetch(API_BASE + "/api/auth/me", { credentials: "include", headers: authHeaders() });
+    if (res.status === 401) onUnauthorized();
     if (!res.ok) {
       const e = new Error("unauthenticated");
       e.status = res.status;
@@ -104,11 +113,13 @@ const API = {
   // persistent conversation history
   async chatSessions() {
     const res = await fetch(API_BASE + "/api/chat/sessions", { credentials: "include", headers: authHeaders() });
+    if (res.status === 401) onUnauthorized();
     return res.json();
   },
   async chatHistory(sessionId) {
     const res = await fetch(API_BASE + "/api/chat/history?session_id=" + encodeURIComponent(sessionId),
       { credentials: "include", headers: authHeaders() });
+    if (res.status === 401) onUnauthorized();
     return res.json();
   },
   chatClear(sessionId) {
@@ -120,10 +131,12 @@ const API = {
   async essays(limit) {
     const res = await fetch(API_BASE + "/api/essays" + (limit ? "?limit=" + limit : ""),
       { credentials: "include", headers: authHeaders() });
+    if (res.status === 401) onUnauthorized();
     return res.json();
   },
   async essay(id) {
     const res = await fetch(API_BASE + "/api/essays/" + id, { credentials: "include", headers: authHeaders() });
+    if (res.status === 401) onUnauthorized();
     return res.json();
   },
   essayFinalize(id, payload) { return this.post(`/api/essays/${id}/finalize`, payload); },
@@ -131,6 +144,7 @@ const API = {
   // notifications
   async notifications() {
     const res = await fetch(API_BASE + "/api/notifications", { credentials: "include", headers: authHeaders() });
+    if (res.status === 401) onUnauthorized();
     return res.json();
   },
 
@@ -149,6 +163,7 @@ const API = {
 
   async get(path) {
     const res = await fetch(API_BASE + path, { credentials: "include", headers: authHeaders() });
+    if (res.status === 401) onUnauthorized();
     const data = await res.json().catch(() => null);
     if (!res.ok) {
       const err = new Error(data?.error || `HTTP ${res.status}`);
@@ -203,6 +218,7 @@ const API = {
   feedback(payload) { return this.post("/api/feedback", payload); },
   async feedbackStats() {
     const res = await fetch(API_BASE + "/api/feedback/stats", { credentials: "include", headers: authHeaders() });
+    if (res.status === 401) onUnauthorized();
     return res.json();
   },
   aiNotes(payload) { return this.post("/api/ai/notes", payload); },
@@ -216,11 +232,13 @@ const API = {
     if (q) params.set("q", q);
     if (sort) params.set("sort", sort);
     const res = await fetch(API_BASE + "/api/notes" + (params.toString() ? "?" + params : ""), { credentials: "include", headers: authHeaders() });
+    if (res.status === 401) onUnauthorized();
     if (!res.ok) throw new Error("HTTP " + res.status);
     return res.json();
   },
   async note(id) {
     const res = await fetch(API_BASE + "/api/notes/" + id, { credentials: "include", headers: authHeaders() });
+    if (res.status === 401) onUnauthorized();
     if (!res.ok) throw new Error("HTTP " + res.status);
     return res.json();
   },
@@ -236,16 +254,19 @@ const API = {
   examSubmit(id, answers) { return this.post(`/api/exams/${id}/submit`, { answers }); },
   async examHistory() {
     const res = await fetch(API_BASE + "/api/exams/history", { credentials: "include", headers: authHeaders() });
+    if (res.status === 401) onUnauthorized();
     return res.json();
   },
 
   // documents
   async docs() {
     const res = await fetch(API_BASE + "/api/documents", { credentials: "include", headers: authHeaders() });
+    if (res.status === 401) onUnauthorized();
     return res.json();
   },
   async doc(id) {
     const res = await fetch(API_BASE + "/api/documents/" + id, { credentials: "include", headers: authHeaders() });
+    if (res.status === 401) onUnauthorized();
     return res.json();
   },
   docUpload(name, dataBase64) { return this.post("/api/documents/upload", { name, data: dataBase64 }); },
@@ -256,6 +277,7 @@ const API = {
   // planner
   async plannerTasks() {
     const res = await fetch(API_BASE + "/api/planner/tasks", { credentials: "include", headers: authHeaders() });
+    if (res.status === 401) onUnauthorized();
     return res.json();
   },
   plannerCreate(payload) { return this.post("/api/planner/tasks", payload); },
@@ -266,6 +288,7 @@ const API = {
   // classrooms
   async classrooms() {
     const res = await fetch(API_BASE + "/api/classrooms", { credentials: "include", headers: authHeaders() });
+    if (res.status === 401) onUnauthorized();
     return res.json();
   },
   classroomCreate(payload) { return this.post("/api/classrooms/create", payload); },

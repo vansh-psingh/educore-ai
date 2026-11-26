@@ -608,3 +608,12 @@ input[type="date"] { background: var(--bg); border: 1px solid var(--border); bor
 .badge{display:inline-block;padding:1px 8px;border-radius:10px;font-size:11px;font-weight:600}
 .chip{display:inline-block;padding:2px 10px;border-radius:20px;font-size:11px;background:rgba(124,58,237,.15);color:#c4b5fd}
 
+
+/* ============ AUTH LAYOUT ============
+   body.auth-mode is the default until the session check resolves and is
+   kept for all unauthenticated/auth pages: dashboard chrome stays hidden. */
+body.auth-mode #sidebar,
+body.auth-mode #sidebarOverlay,
+body.auth-mode #topbar { display: none; }
+body.auth-mode #main { width: 100%; }
+body.auth-mode #view { padding: 0; }

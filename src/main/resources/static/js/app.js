@@ -52,6 +52,15 @@ function init() {
     .then(u => { state.user = u; })
     .catch(() => { state.user = null; })
     .finally(() => { renderProfile(); route(); });
+
+  // session expired mid-use: drop local state and return to sign-in
+  window.addEventListener("educore:unauthorized", () => {
+    state.user = null;
+    state.chats = {};
+    state.remoteChats = {};
+    renderProfile();
+    location.hash = "#/login";
+  });
 }
 
 function renderProfile() {
@@ -240,6 +249,10 @@ function route() {
     location.hash = "#/overview";
     return;
   }
+
+  // layout gate: chrome only renders for authenticated dashboard views
+  document.body.classList.toggle("auth-mode",
+    !state.user || AUTH_PAGES.includes(state.view));
 
   document.querySelectorAll(".nav-item").forEach(a =>
     a.classList.toggle("active", a.dataset.view === state.view));
