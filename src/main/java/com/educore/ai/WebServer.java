@@ -96,6 +96,14 @@ public final class WebServer {
                     sendJson(exchange, 200, AuthService.me(claimsOf(exchange)));
                     return;
                 }
+                if ("GET".equals(method) && path.equals("/api/auth/captcha-config")) {
+                    // public config: site key only - the secret never leaves the backend
+                    ObjectNode cfg = MAPPER.createObjectNode();
+                    cfg.put("enabled", CaptchaService.siteKeyConfigured());
+                    if (CaptchaService.siteKeyConfigured()) cfg.put("site_key", CaptchaService.siteKey());
+                    sendJson(exchange, 200, cfg);
+                    return;
+                }
                 if (!"POST".equals(method)) {
                     send(exchange, 405, "{\"error\":\"method not allowed\"}", "application/json");
                     return;
@@ -108,6 +116,8 @@ public final class WebServer {
                         sendJson(exchange, 200, resp);
                     }
                     case "/api/auth/login" -> {
+                        // CAPTCHA supplements (never replaces) rate limiting + credentials
+                        CaptchaService.verify(req.path("captcha_token").asText(""), ip);
                         ObjectNode resp = AuthService.login(req);
                         setAuthCookies(exchange, resp.path("access_token").asText(), resp.path("refresh_token").asText());
                         sendJson(exchange, 200, resp);
@@ -126,6 +136,9 @@ public final class WebServer {
                     }
                     case "/api/auth/forgot" -> sendJson(exchange, 200, AuthService.forgot(req, ip));
                     case "/api/auth/reset" -> { AuthService.reset(req); send(exchange, 200, "{\"ok\":true}", "application/json"); }
+                    case "/api/auth/otp/request" -> sendJson(exchange, 200, AuthService.otpRequest(req, ip));
+                    case "/api/auth/otp/verify" -> sendJson(exchange, 200, AuthService.otpVerify(req));
+                    case "/api/auth/otp/reset" -> { AuthService.otpReset(req); send(exchange, 200, "{\"ok\":true}", "application/json"); }
                     case "/api/auth/change-password" -> {
                         AuthService.AuthUser u = requireUser(exchange);
                         if (u == null) return;

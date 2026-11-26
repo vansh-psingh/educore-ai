@@ -28,7 +28,7 @@ const TITLES = {
   insights: "Learning Insights", planner: "Study Planner", classrooms: "Classrooms",
   notifications: "Notifications", settings: "Settings",
   login: "Sign in", register: "Create account",
-  forgot: "Reset password", reset: "Set new password",
+  forgot: "Reset password", otp: "Verify code", reset: "Set new password",
 };
 
 const state = {
@@ -40,7 +40,7 @@ const state = {
   quiz: null,         // {student, key, answers, submitted, score}
 };
 
-const AUTH_PAGES = ["login", "register", "forgot", "reset"];
+const AUTH_PAGES = ["login", "register", "forgot", "otp", "reset"];
 
 /* ---------------- boot ---------------- */
 
@@ -235,6 +235,7 @@ const VIEWS = {
   login: vLogin,
   register: vRegister,
   forgot: vForgot,
+  otp: vOtp,
   reset: vReset,
 };
 
@@ -1397,6 +1398,21 @@ function bindPwToggles(root) {
     }));
 }
 
+/* ---------- Cloudflare Turnstile CAPTCHA ---------- */
+let _turnstileLoading = null;
+function loadTurnstile() {
+  if (window.turnstile) return Promise.resolve();
+  if (_turnstileLoading) return _turnstileLoading;
+  _turnstileLoading = new Promise((res, rej) => {
+    const s = document.createElement("script");
+    s.src = "https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit";
+    s.async = true; s.defer = true;
+    s.onload = res; s.onerror = () => rej(new Error("captcha script failed"));
+    document.head.appendChild(s);
+  });
+  return _turnstileLoading;
+}
+
 function vLogin(root) {
   root.innerHTML = authShell(`
     <h2 style="text-align:center;margin-bottom:18px">Welcome back</h2>
@@ -1404,12 +1420,35 @@ function vLogin(root) {
     <div class="field"><label>Password</label>
       <div class="pw-wrap"><input type="password" id="liPass" placeholder="Your password" autocomplete="current-password">${pwToggle("liPass")}</div>
     </div>
+    <div id="liCaptcha" style="margin:4px 0 10px;min-height:0"></div>
     <div class="auth-error" id="liErr"></div>
     <button class="btn btn-primary" id="liGo" style="width:100%;justify-content:center">Sign in</button>
     <div class="auth-links">
       <a href="#/forgot">Forgot password?</a>
       <a href="#/register">Create account</a>
     </div>`);
+
+  let captchaToken = "";
+  let widgetId = null;
+  // render the widget only when the backend reports CAPTCHA is configured
+  API.captchaConfig().then(cfg => {
+    if (!cfg.enabled || !cfg.site_key) return;
+    loadTurnstile().then(() => {
+      const box = document.getElementById("liCaptcha");
+      if (!box || !window.turnstile) return;
+      widgetId = turnstile.render(box, {
+        sitekey: cfg.site_key,
+        callback: t => { captchaToken = t; },
+        "expired-callback": () => { captchaToken = ""; },
+        "error-callback": () => { captchaToken = ""; }
+      });
+    }).catch(() => {});
+  }).catch(() => {});
+
+  const resetCaptcha = () => {
+    captchaToken = "";
+    try { if (widgetId !== null && window.turnstile) turnstile.reset(widgetId); } catch (e) {}
+  };
 
   const go = async () => {
     const err = document.getElementById("liErr");
@@ -1419,12 +1458,13 @@ function vLogin(root) {
     if (!email || !password) { err.textContent = "Enter your email and password."; return; }
     document.getElementById("liGo").disabled = true;
     try {
-      const r = await API.authLogin({ email, password });
+      const r = await API.authLogin({ email, password, captcha_token: captchaToken });
       state.user = r.user;
       renderProfile();
       location.hash = "#/overview";
     } catch (e) {
       err.textContent = e.message;
+      resetCaptcha(); // fresh challenge after every failed attempt
       document.getElementById("liGo").disabled = false;
     }
   };
@@ -1478,38 +1518,139 @@ function vRegister(root) {
 function vForgot(root) {
   root.innerHTML = authShell(`
     <h2 style="text-align:center;margin-bottom:18px">Reset password</h2>
-    <p class="muted" style="margin-bottom:14px">Enter your account email and we'll send you a secure reset link. The link expires in 30 minutes.</p>
-    <div class="field"><label>Email</label><input type="email" id="fgEmail" placeholder="you@example.com"></div>
+    <p class="muted" style="margin-bottom:14px">Enter your account email and we'll send you a 6-digit verification code. The code expires in 5 minutes.</p>
+    <div class="field"><label>Email</label><input type="email" id="fgEmail" placeholder="you@example.com" autocomplete="email"></div>
     <div class="auth-error" id="fgErr"></div>
     <div class="auth-ok" id="fgOk"></div>
-    <button class="btn btn-primary" id="fgGo" style="width:100%;justify-content:center">Send reset link</button>
+    <button class="btn btn-primary" id="fgGo" style="width:100%;justify-content:center">Send verification code</button>
     <div class="auth-links"><a href="#/login">Back to sign in</a></div>`);
 
   document.getElementById("fgGo").addEventListener("click", async () => {
     const err = document.getElementById("fgErr");
     const ok = document.getElementById("fgOk");
+    const btn = document.getElementById("fgGo");
     err.textContent = ""; ok.textContent = "";
     const email = document.getElementById("fgEmail").value.trim();
     if (!email) { err.textContent = "Enter your email."; return; }
+    btn.disabled = true;
+    btn.textContent = "Sending...";
     try {
-      const r = await API.authForgot({ email });
-      ok.textContent = r.message || "If an account exists for this email, a reset link has been sent.";
-    } catch (e) { err.textContent = e.message; }
+      const r = await API.authOtpRequest({ email });
+      // generic response - never reveals whether the account exists
+      try { localStorage.setItem("educore_otp_email", email); } catch (e) {}
+      ok.textContent = r.message || "If an account exists for this email, a verification code will be sent.";
+      setTimeout(() => location.hash = "#/otp", 900);
+    } catch (e) {
+      err.textContent = e.message;
+      btn.disabled = false;
+      btn.textContent = "Send verification code";
+    }
+  });
+}
+
+function vOtp(root) {
+  let email = "";
+  try { email = localStorage.getItem("educore_otp_email") || ""; } catch (e) {}
+  root.innerHTML = authShell(`
+    <h2 style="text-align:center;margin-bottom:18px">Enter verification code</h2>
+    <p class="muted" style="margin-bottom:14px">We sent a 6-digit code to <strong id="otpEmail"></strong>. It expires in 5 minutes.</p>
+    <div class="field"><label>Verification code</label>
+      <input type="text" id="otpCode" inputmode="numeric" pattern="[0-9]*" maxlength="6"
+        placeholder="••••••" autocomplete="one-time-code" style="text-align:center;font-size:24px;letter-spacing:8px;font-weight:700">
+    </div>
+    <div class="auth-error" id="otpErr"></div>
+    <div class="auth-ok" id="otpOk"></div>
+    <button class="btn btn-primary" id="otpGo" style="width:100%;justify-content:center">Verify code</button>
+    <div class="auth-links">
+      <a href="#/forgot">Change email</a>
+      <a href="#" id="otpResend">Resend code</a>
+      <span class="muted" id="otpTimer"></span>
+    </div>`);
+  document.getElementById("otpEmail").textContent = email || "your email";
+
+  let cooldown = 0;
+  const timerEl = document.getElementById("otpTimer");
+  const resendEl = document.getElementById("otpResend");
+  const tick = setInterval(() => {
+    if (cooldown > 0) {
+      cooldown--;
+      timerEl.textContent = `Resend in ${cooldown}s`;
+      resendEl.style.pointerEvents = "none";
+      resendEl.style.opacity = ".5";
+    } else {
+      timerEl.textContent = "";
+      resendEl.style.pointerEvents = "";
+      resendEl.style.opacity = "";
+      clearInterval(tick);
+    }
+  }, 1000);
+
+  const requestCode = async () => {
+    if (!email) { location.hash = "#/forgot"; return; }
+    try {
+      await API.authOtpRequest({ email });
+      cooldown = 60;
+      timerEl.textContent = "Resend in 60s";
+      resendEl.style.pointerEvents = "none";
+      resendEl.style.opacity = ".5";
+      document.getElementById("otpOk").textContent = "If an account exists for this email, a verification code will be sent.";
+    } catch (e) {
+      document.getElementById("otpErr").textContent = e.message;
+    }
+  };
+  resendEl.addEventListener("click", e => { e.preventDefault(); requestCode(); });
+
+  const go = async () => {
+    const err = document.getElementById("otpErr");
+    const ok = document.getElementById("otpOk");
+    err.textContent = ""; ok.textContent = "";
+    const code = document.getElementById("otpCode").value.trim();
+    if (!/^\d{6}$/.test(code)) { err.textContent = "Enter the 6-digit code."; return; }
+    if (!email) { err.textContent = "Session expired - start again."; location.hash = "#/forgot"; return; }
+    document.getElementById("otpGo").disabled = true;
+    try {
+      const r = await API.authOtpVerify({ email, otp: code });
+      try {
+        localStorage.setItem("educore_reset_ticket", r.reset_ticket || "");
+        localStorage.setItem("educore_reset_email", email);
+      } catch (e) {}
+      ok.textContent = "Code verified - set your new password.";
+      setTimeout(() => location.hash = "#/reset", 700);
+    } catch (e2) {
+      err.textContent = e2.message;
+      document.getElementById("otpGo").disabled = false;
+    }
+  };
+  document.getElementById("otpGo").addEventListener("click", go);
+  document.getElementById("otpCode").addEventListener("keydown", e => { if (e.key === "Enter") go(); });
+  document.getElementById("otpCode").addEventListener("input", e => {
+    e.target.value = e.target.value.replace(/\D/g, "").slice(0, 6);
   });
 }
 
 function vReset(root) {
-  // support emailed links: #/reset?token=...&email=...
+  // OTP flow: #/reset?ticket=...&email=... (ticket stored client-side too)
   const hashQ = location.hash.includes("?") ? location.hash.split("?")[1] : "";
   const qp = new URLSearchParams(hashQ);
-  const prefillToken = qp.get("token") || "";
+  const prefillToken = qp.get("token") || "";   // legacy link-based reset
   const prefillEmail = qp.get("email") || "";
+  let ticket = qp.get("ticket") || "";
+  let email = prefillEmail;
+  try {
+    if (!ticket) ticket = localStorage.getItem("educore_reset_ticket") || "";
+    if (!email) email = localStorage.getItem("educore_reset_email") || "";
+  } catch (e) {}
+  const isOtp = !!ticket;
+
   root.innerHTML = authShell(`
     <h2 style="text-align:center;margin-bottom:18px">Set new password</h2>
-    <div class="field"><label>Email</label><input type="email" id="rsEmail" placeholder="you@example.com" value="${esc(prefillEmail)}"></div>
-    <div class="field"><label>Reset token</label><input type="text" id="rsToken" placeholder="Paste reset token" value="${esc(prefillToken)}"></div>
+    ${isOtp ? "" : `<div class="field"><label>Email</label><input type="email" id="rsEmail" placeholder="you@example.com" value="${esc(email)}"></div>
+    <div class="field"><label>Reset token</label><input type="text" id="rsToken" placeholder="Paste reset token" value="${esc(prefillToken)}"></div>`}
     <div class="field"><label>New password</label>
-      <div class="pw-wrap"><input type="password" id="rsPass" placeholder="Min 8 characters">${pwToggle("rsPass")}</div>
+      <div class="pw-wrap"><input type="password" id="rsPass" placeholder="Min 8 characters" autocomplete="new-password">${pwToggle("rsPass")}</div>
+    </div>
+    <div class="field"><label>Confirm new password</label>
+      <div class="pw-wrap"><input type="password" id="rsPass2" placeholder="Repeat password" autocomplete="new-password">${pwToggle("rsPass2")}</div>
     </div>
     <div class="auth-error" id="rsErr"></div>
     <div class="auth-ok" id="rsOk"></div>
@@ -1520,12 +1661,20 @@ function vReset(root) {
     const err = document.getElementById("rsErr");
     const ok = document.getElementById("rsOk");
     err.textContent = ""; ok.textContent = "";
+    const password = document.getElementById("rsPass").value;
+    const confirm = document.getElementById("rsPass2").value;
+    if (password !== confirm) { err.textContent = "Passwords do not match."; return; }
     try {
-      await API.authReset({
-        email: document.getElementById("rsEmail").value.trim(),
-        token: document.getElementById("rsToken").value.trim(),
-        password: document.getElementById("rsPass").value
-      });
+      if (isOtp) {
+        await API.authOtpReset({ email, ticket, password, confirm });
+        try { localStorage.removeItem("educore_reset_ticket"); localStorage.removeItem("educore_reset_email"); localStorage.removeItem("educore_otp_email"); } catch (e) {}
+      } else {
+        await API.authReset({
+          email: document.getElementById("rsEmail").value.trim(),
+          token: document.getElementById("rsToken").value.trim(),
+          password
+        });
+      }
       ok.textContent = "Password updated. You can sign in now.";
       setTimeout(() => location.hash = "#/login", 1500);
     } catch (e) { err.textContent = e.message; }

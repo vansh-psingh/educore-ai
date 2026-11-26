@@ -299,6 +299,21 @@ public final class Schema {
                     CREATE UNIQUE INDEX IF NOT EXISTS idx_rev_user_topic
                         ON revision_items(owner_id, subject, topic);
                     CREATE INDEX IF NOT EXISTS idx_rev_due ON revision_items(owner_id, due_date);
+                    """),
+            new Migration(3, "otp-password-reset", """
+                    -- ============ email OTP codes for password reset ============
+                    CREATE TABLE IF NOT EXISTS otp_codes (
+                        id          bigserial PRIMARY KEY,
+                        user_id     text NOT NULL REFERENCES app_users(id) ON DELETE CASCADE,
+                        otp_hash    text NOT NULL,
+                        expires_at  timestamptz NOT NULL,
+                        attempts    int NOT NULL DEFAULT 0,
+                        used_at     timestamptz,
+                        created_ip  text,
+                        created_at  timestamptz NOT NULL DEFAULT now()
+                    );
+                    CREATE INDEX IF NOT EXISTS idx_otp_user   ON otp_codes(user_id);
+                    CREATE INDEX IF NOT EXISTS idx_otp_expiry ON otp_codes(expires_at);
                     """)
     );
 

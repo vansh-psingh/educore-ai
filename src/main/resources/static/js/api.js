@@ -95,6 +95,13 @@ const API = {
   async authLogout() { try { await this.post("/api/auth/logout", {}); } finally { clearTokens(); } },
   authForgot(p) { return this.post("/api/auth/forgot", p); },
   authReset(p) { return this.post("/api/auth/reset", p); },
+  async captchaConfig() {
+    const res = await fetch(API_BASE + "/api/auth/captcha-config", { credentials: "include" });
+    return res.json();
+  },
+  authOtpRequest(p) { return this.post("/api/auth/otp/request", p); },
+  authOtpVerify(p) { return this.post("/api/auth/otp/verify", p); },
+  authOtpReset(p) { return this.post("/api/auth/otp/reset", p); },
   authChangePassword(p) { return this.post("/api/auth/change-password", p); },
   async authMe() {
     const res = await fetch(API_BASE + "/api/auth/me", { credentials: "include", headers: authHeaders() });

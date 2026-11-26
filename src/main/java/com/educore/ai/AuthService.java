@@ -396,6 +396,340 @@ public final class AuthService {
         }
     }
 
+    // ================= email OTP password reset =================
+    // 6-digit code, 5-minute expiry, single use, max 5 verify attempts,
+    // 60s resend cooldown, max 3 sends/hour per email. Only a keyed hash of
+    // the OTP is stored - the plaintext code is never persisted or logged
+    // (except the dev fallback below, server-side only, never in the API).
+
+    private static final int OTP_TTL_SEC = 5 * 60;
+    private static final int OTP_TICKET_TTL_SEC = 10 * 60;
+    private static final int OTP_MAX_ATTEMPTS = 5;
+    private static final long OTP_RESEND_COOLDOWN_MS = 60_000;
+    private static final int OTP_MAX_PER_HOUR = 3;
+
+    /** Keyed hash of an OTP - binds the code to the user, constant-time comparable. */
+    private static String otpHash(String userId, String otp) {
+        try {
+            Mac mac = Mac.getInstance("HmacSHA256");
+            mac.init(new SecretKeySpec(secret(), "HmacSHA256"));
+            byte[] d = mac.doFinal((userId + ":" + otp).getBytes(StandardCharsets.UTF_8));
+            StringBuilder sb = new StringBuilder(d.length * 2);
+            for (byte b : d) sb.append(String.format("%02x", b));
+            return sb.toString();
+        } catch (Exception e) {
+            throw new IllegalStateException("otp hashing failed", e);
+        }
+    }
+
+    /**
+     * Step 1: request an OTP. ALWAYS returns the same generic message -
+     * account existence is never revealed. Throttling (60s cooldown,
+     * 3/hour cap) is applied silently before generating/sending.
+     */
+    public static ObjectNode otpRequest(JsonNode req, String clientIp) {
+        String email = req.path("email").asText("").trim().toLowerCase();
+        ObjectNode out = MAPPER.createObjectNode();
+        out.put("message", "If an account exists for this email, a verification code will be sent.");
+        if (!email.matches("^[^@\\s]+@[^@\\s]+\\.[^@\\s]+$")) return out;
+        JsonNode u = findByEmail(email);
+        if (u == null) {
+            AuditService.log(null, email, "otp_requested_unknown", "");
+            return out;
+        }
+        String userId = u.path("id").asText();
+
+        // per-email throttle: resend cooldown + hourly cap (silent - no info leak)
+        if (Db.configured()) {
+            try (var c = Db.conn()) {
+                try (var ps = c.prepareStatement(
+                        "SELECT created_at FROM otp_codes WHERE user_id = ? "
+                                + "ORDER BY id DESC LIMIT 1")) {
+                    ps.setString(1, userId);
+                    try (var rs = ps.executeQuery()) {
+                        if (rs.next()) {
+                            long last = rs.getTimestamp(1).getTime();
+                            if (System.currentTimeMillis() - last < OTP_RESEND_COOLDOWN_MS) return out;
+                        }
+                    }
+                }
+                try (var ps = c.prepareStatement(
+                        "SELECT count(*) FROM otp_codes WHERE user_id = ? "
+                                + "AND created_at > now() - interval '1 hour'")) {
+                    ps.setString(1, userId);
+                    try (var rs = ps.executeQuery()) {
+                        if (rs.next() && rs.getInt(1) >= OTP_MAX_PER_HOUR) return out;
+                    }
+                }
+            } catch (Exception e) {
+                System.err.println("[auth] otp throttle check failed: " + e.getMessage());
+                return out;
+            }
+        } else {
+            JsonNode un = users().path(email);
+            String lastSent = un.path("otp_last_sent").asText("");
+            if (!lastSent.isEmpty()) {
+                try {
+                    if (Instant.parse(lastSent).plusMillis(OTP_RESEND_COOLDOWN_MS)
+                            .isAfter(Instant.now())) return out;
+                } catch (Exception ignored) {
+                }
+            }
+        }
+
+        // generate 6-digit OTP
+        String otp = String.format("%06d", RANDOM.nextInt(1_000_000));
+        String hash = otpHash(userId, otp);
+        Instant expires = Instant.now().plusSeconds(OTP_TTL_SEC);
+
+        if (Db.configured()) {
+            try (var c = Db.conn()) {
+                c.setAutoCommit(false);
+                try (var ps = c.prepareStatement(
+                        "UPDATE otp_codes SET used_at = now() WHERE user_id = ? AND used_at IS NULL")) {
+                    ps.setString(1, userId);
+                    ps.executeUpdate();
+                }
+                try (var ps = c.prepareStatement(
+                        "INSERT INTO otp_codes(user_id, otp_hash, expires_at, created_ip) "
+                                + "VALUES (?,?,?,?)")) {
+                    ps.setString(1, userId);
+                    ps.setString(2, hash);
+                    ps.setObject(3, java.sql.Timestamp.from(expires));
+                    ps.setString(4, clientIp);
+                    ps.executeUpdate();
+                }
+                c.commit();
+            } catch (Exception e) {
+                System.err.println("[auth] otp store failed: " + e.getMessage());
+                return out;
+            }
+        } else {
+            ObjectNode un = (ObjectNode) u;
+            un.put("otp_hash", hash);
+            un.put("otp_exp", expires.toString());
+            un.put("otp_attempts", 0);
+            un.put("otp_last_sent", Instant.now().toString());
+            un.remove("otp_used");
+            saveUser(email, un);
+        }
+
+        deliverOtpEmail(u, email, otp);
+        AuditService.log(userId, email, "otp_requested", userId);
+        return out;
+    }
+
+    /** Dev fallback: OTP visible in server console ONLY when SMTP is absent. */
+    private static void deliverOtpEmail(JsonNode u, String email, String otp) {
+        String name = u.path("name").asText("");
+        try {
+            if (SmtpMailer.configured()) {
+                SmtpMailer.sendHtml(email, "Your EDUCORE AI verification code",
+                        SmtpMailer.otpEmailHtml(name, otp, OTP_TTL_SEC / 60));
+                AuditService.log(u.path("id").asText(), email, "otp_email_sent", u.path("id").asText());
+            } else {
+                // dev mode only - server console, never the API response
+                System.out.println("[auth] SMTP not configured - OTP for " + email + ": " + otp
+                        + " (expires in " + (OTP_TTL_SEC / 60) + " min)");
+                AuditService.log(u.path("id").asText(), email, "otp_email_dev_logged", u.path("id").asText());
+            }
+        } catch (Exception e) {
+            System.err.println("[auth] otp email failed for " + email + ": " + e.getMessage());
+            AuditService.log(u.path("id").asText(), email, "otp_email_failed", u.path("id").asText());
+        }
+    }
+
+    /**
+     * Step 2: verify the OTP. On success returns a short-lived single-use
+     * reset ticket (never the OTP itself). Wrong codes increment the attempt
+     * counter; at 5 attempts the code is invalidated.
+     */
+    public static ObjectNode otpVerify(JsonNode req) throws Exception {
+        String email = req.path("email").asText("").trim().toLowerCase();
+        String otp = req.path("otp").asText("").trim();
+        ObjectNode out = MAPPER.createObjectNode();
+        JsonNode u = findByEmail(email);
+        if (u == null || otp.length() != 6 || !otp.matches("\\d{6}")) {
+            throw new IllegalArgumentException("Invalid or expired verification code.");
+        }
+        String userId = u.path("id").asText();
+
+        if (Db.configured()) {
+            // find the newest active code for this user
+            long rowId = -1;
+            String storedHash = null;
+            int attempts = 0;
+            try (var c = Db.conn();
+                 var ps = c.prepareStatement(
+                         "SELECT id, otp_hash, attempts FROM otp_codes "
+                                 + "WHERE user_id = ? AND used_at IS NULL AND expires_at > now() "
+                                 + "ORDER BY id DESC LIMIT 1")) {
+                ps.setString(1, userId);
+                try (var rs = ps.executeQuery()) {
+                    if (rs.next()) {
+                        rowId = rs.getLong(1);
+                        storedHash = rs.getString(2);
+                        attempts = rs.getInt(3);
+                    }
+                }
+            }
+            if (rowId < 0) throw new IllegalArgumentException("Invalid or expired verification code.");
+            if (attempts >= OTP_MAX_ATTEMPTS) {
+                invalidateOtpRow(rowId);
+                throw new IllegalArgumentException("Too many incorrect attempts. Request a new code.");
+            }
+            String candidate = otpHash(userId, otp);
+            if (!MessageDigest.isEqual(
+                    storedHash.getBytes(StandardCharsets.UTF_8),
+                    candidate.getBytes(StandardCharsets.UTF_8))) {
+                try (var c = Db.conn();
+                     var ps = c.prepareStatement("UPDATE otp_codes SET attempts = attempts + 1 WHERE id = ?")) {
+                    ps.setLong(1, rowId);
+                    ps.executeUpdate();
+                }
+                throw new IllegalArgumentException("Incorrect verification code.");
+            }
+            // atomic single-use consume
+            try (var c = Db.conn();
+                 var ps = c.prepareStatement(
+                         "UPDATE otp_codes SET used_at = now() WHERE id = ? AND used_at IS NULL")) {
+                ps.setLong(1, rowId);
+                if (ps.executeUpdate() != 1) {
+                    throw new IllegalArgumentException("Invalid or expired verification code.");
+                }
+            }
+        } else {
+            ObjectNode un = (ObjectNode) u;
+            String stored = un.path("otp_hash").asText("");
+            String exp = un.path("otp_exp").asText("");
+            int attempts = un.path("otp_attempts").asInt(0);
+            boolean expired;
+            try { expired = exp.isEmpty() || Instant.parse(exp).isBefore(Instant.now()); }
+            catch (Exception e) { expired = true; }
+            if (stored.isEmpty() || expired) {
+                throw new IllegalArgumentException("Invalid or expired verification code.");
+            }
+            if (attempts >= OTP_MAX_ATTEMPTS) {
+                un.remove("otp_hash"); un.remove("otp_exp");
+                un.remove("otp_attempts"); un.remove("otp_last_sent");
+                saveUser(email, un);
+                throw new IllegalArgumentException("Too many incorrect attempts. Request a new code.");
+            }
+            String candidate = otpHash(userId, otp);
+            if (!MessageDigest.isEqual(
+                    stored.getBytes(StandardCharsets.UTF_8),
+                    candidate.getBytes(StandardCharsets.UTF_8))) {
+                un.put("otp_attempts", attempts + 1);
+                saveUser(email, un);
+                throw new IllegalArgumentException("Incorrect verification code.");
+            }
+            un.remove("otp_hash"); un.remove("otp_exp");
+            un.remove("otp_attempts"); un.remove("otp_last_sent");
+            saveUser(email, un);
+        }
+
+        // success: issue a short-lived single-use reset ticket
+        String ticket = issueResetTicket(userId, "");
+        AuditService.log(userId, email, "otp_verified", userId);
+        out.put("reset_ticket", ticket);
+        out.put("expires_in", OTP_TICKET_TTL_SEC);
+        return out;
+    }
+
+    private static void invalidateOtpRow(long rowId) {
+        try (var c = Db.conn();
+             var ps = c.prepareStatement("UPDATE otp_codes SET used_at = now() WHERE id = ?")) {
+            ps.setLong(1, rowId);
+            ps.executeUpdate();
+        } catch (Exception ignored) {
+        }
+    }
+
+    /**
+     * Issues a single-use reset ticket (random 32-byte token, only its hash is
+     * stored). Reuses password_reset_tokens in DB mode; JSON mode stores the
+     * hash on the user record like the link flow.
+     */
+    private static String issueResetTicket(String userId, String clientIp) throws Exception {
+        byte[] raw = new byte[32];
+        RANDOM.nextBytes(raw);
+        String ticket = Base64.getUrlEncoder().withoutPadding().encodeToString(raw);
+        String hash = hashToken(ticket);
+        Instant expires = Instant.now().plusSeconds(OTP_TICKET_TTL_SEC);
+        if (Db.configured()) {
+            try (var c = Db.conn()) {
+                c.setAutoCommit(false);
+                try (var ps = c.prepareStatement(
+                        "UPDATE password_reset_tokens SET used_at = now() "
+                                + "WHERE user_id = ? AND used_at IS NULL")) {
+                    ps.setString(1, userId);
+                    ps.executeUpdate();
+                }
+                try (var ps = c.prepareStatement(
+                        "INSERT INTO password_reset_tokens(user_id, token_hash, expires_at, created_ip) "
+                                + "VALUES (?,?,?,?)")) {
+                    ps.setString(1, userId);
+                    ps.setString(2, hash);
+                    ps.setObject(3, java.sql.Timestamp.from(expires));
+                    ps.setString(4, clientIp);
+                    ps.executeUpdate();
+                }
+                c.commit();
+            }
+        } else {
+            JsonNode u = findById(userId);
+            if (u != null) {
+                ObjectNode un = (ObjectNode) u;
+                un.put("reset_token", hash);
+                un.put("reset_exp", expires.toString());
+                saveUser(un.path("email").asText(), un);
+            }
+        }
+        return ticket;
+    }
+
+    /**
+     * Step 3: set the new password using the verified reset ticket.
+     * The ticket is single-use - it is consumed atomically on success.
+     */
+    public static void otpReset(JsonNode req) throws Exception {
+        String email = req.path("email").asText("").trim().toLowerCase();
+        String ticket = req.path("ticket").asText("");
+        String password = req.path("password").asText("");
+        String confirm = req.path("confirm").asText("");
+        if (password.length() < 8) throw new IllegalArgumentException("Password must be at least 8 characters.");
+        if (!password.equals(confirm)) throw new IllegalArgumentException("Passwords do not match.");
+        if (ticket.isEmpty()) throw new IllegalArgumentException("Reset session expired. Verify your code again.");
+        JsonNode u = findByEmail(email);
+        if (u == null) throw new IllegalArgumentException("Invalid reset request.");
+        String userId = u.path("id").asText();
+        String tokenHash = hashToken(ticket);
+
+        boolean valid;
+        if (Db.configured()) {
+            valid = consumeDbResetToken(userId, tokenHash);
+        } else {
+            ObjectNode un = (ObjectNode) u;
+            String stored = un.path("reset_token").asText("");
+            String exp = un.path("reset_exp").asText("");
+            valid = !stored.isEmpty() && stored.equals(tokenHash)
+                    && Instant.parse(exp).isAfter(Instant.now());
+            if (valid) {
+                un.remove("reset_token");
+                un.remove("reset_exp");
+            }
+        }
+        if (!valid) throw new IllegalArgumentException("Reset session is invalid or expired. Verify your code again.");
+
+        byte[] salt = new byte[16];
+        RANDOM.nextBytes(salt);
+        ObjectNode un = (ObjectNode) u;
+        un.put("pass_hash", hashPassword(password, salt));
+        un.put("updated", Instant.now().toString());
+        saveUser(email, un);
+        AuditService.log(userId, email, "otp_password_reset_completed", userId);
+    }
+
     /** Change password for an authenticated user (claims from verified token). */
     public static void changePassword(Map<String, String> claims, JsonNode req) throws Exception {
         String current = req.path("current_password").asText("");
