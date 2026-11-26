@@ -146,7 +146,7 @@ body {
 .pf-avatar img { width: 100%; height: 100%; object-fit: cover; display: block; }
 
 /* compact appearance row + mobile fields */
-.appearance-card { padding: 14px 16px !important; }
+.appearance-card { padding: 14px 16px !important; height: fit-content; align-self: start; }
 .app-row { display: flex; align-items: center; justify-content: space-between; gap: 14px; flex-wrap: wrap; }
 .app-info { display: flex; align-items: center; gap: 10px; min-width: 0; }
 .app-info > svg { width: 20px; height: 20px; color: var(--purple); flex-shrink: 0; }
