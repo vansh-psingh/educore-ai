@@ -614,3 +614,148 @@ body.auth-mode #sidebarOverlay,
 body.auth-mode #topbar { display: none; }
 body.auth-mode #main { width: 100%; }
 body.auth-mode #view { padding: 0; }
+
+/* ============================================================
+   PREMIUM POLISH LAYER (additive - does not replace base rules)
+   ============================================================ */
+
+/* ambient depth: soft brand glows behind the whole app */
+body::before {
+  content: "";
+  position: fixed; inset: 0; z-index: 0;
+  pointer-events: none;
+  background:
+    radial-gradient(900px 480px at 85% -10%, rgba(139,92,246,.10), transparent 60%),
+    radial-gradient(800px 420px at -10% 110%, rgba(34,211,238,.07), transparent 60%),
+    radial-gradient(600px 300px at 50% 50%, rgba(59,130,246,.05), transparent 65%);
+}
+#app { position: relative; z-index: 1; }
+[data-theme="light"] body::before { opacity: .5; }
+
+::selection { background: rgba(139,92,246,.4); color: #fff; }
+
+/* thin elegant scrollbars everywhere */
+::-webkit-scrollbar { width: 8px; height: 8px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: rgba(148,163,184,.22); border-radius: 8px; }
+::-webkit-scrollbar-thumb:hover { background: rgba(148,163,184,.4); }
+
+/* ---- sidebar ---- */
+#sidebar { background: linear-gradient(180deg, #0d1526 0%, var(--sidebar) 30%); }
+.nav-item { position: relative; }
+.nav-item.active { box-shadow: 0 6px 18px rgba(139,92,246,.35), inset 0 0 0 1px rgba(255,255,255,.06); }
+.nav-item.active::after {
+  content: ""; position: absolute; left: -12px; top: 20%; bottom: 20%;
+  width: 3px; border-radius: 3px;
+  background: linear-gradient(180deg, var(--cyan), var(--purple));
+}
+#sidebar.collapsed .nav-item.active::after { left: -8px; }
+.nav-item:focus-visible, .btn:focus-visible, .icon-btn:focus-visible,
+.quiz-opt:focus-visible, .chip:focus-visible, .profile-chip:focus-visible {
+  outline: 2px solid var(--cyan); outline-offset: 2px;
+}
+.sidebar-footer { background: rgba(255,255,255,.015); }
+
+/* ---- topbar ---- */
+#topbar {
+  backdrop-filter: blur(16px) saturate(1.5);
+  -webkit-backdrop-filter: blur(16px) saturate(1.5);
+  background: color-mix(in srgb, var(--bg) 72%, transparent);
+  box-shadow: 0 1px 0 rgba(148,163,184,.08), 0 8px 24px rgba(0,0,0,.18);
+}
+.search-box input:focus { border-color: var(--cyan); box-shadow: 0 0 0 3px rgba(34,211,238,.15); }
+
+/* ---- cards & grids ---- */
+.card { box-shadow: 0 1px 2px rgba(0,0,0,.25), 0 8px 24px rgba(0,0,0,.12); }
+.card.hoverable:hover { box-shadow: 0 14px 34px rgba(0,0,0,.35), var(--glow); }
+.quick-card .icon-wrap { box-shadow: inset 0 0 0 1px rgba(255,255,255,.05); transition: transform .2s; }
+.quick-card:hover .icon-wrap { transform: scale(1.06) rotate(-3deg); }
+.stat-card { transition: transform .2s, box-shadow .2s; }
+.stat-card:hover { transform: translateY(-2px); box-shadow: 0 10px 26px rgba(0,0,0,.28); }
+
+/* staggered entrance for grid children */
+.view .grid > * { animation: fadeUp .4s ease both; }
+.view .grid > *:nth-child(2) { animation-delay: .05s; }
+.view .grid > *:nth-child(3) { animation-delay: .1s; }
+.view .grid > *:nth-child(4) { animation-delay: .15s; }
+.view .grid > *:nth-child(5) { animation-delay: .2s; }
+.view .grid > *:nth-child(6) { animation-delay: .25s; }
+.view .grid > *:nth-child(7) { animation-delay: .3s; }
+.view .grid > *:nth-child(n+8) { animation-delay: .35s; }
+
+/* ---- buttons ---- */
+.btn-primary {
+  background: linear-gradient(135deg, #8b5cf6, #3b82f6 55%, #22d3ee);
+  box-shadow: 0 4px 16px rgba(139,92,246,.35);
+}
+.btn-primary:hover { box-shadow: 0 6px 22px rgba(139,92,246,.5); }
+.btn:active { transform: translateY(0) scale(.98); }
+.icon-btn:active { transform: scale(.94); }
+
+/* ---- inputs: consistent focus ring ---- */
+.field input:focus, .field select:focus, .field textarea:focus,
+.ask-box textarea:focus, .chat-input-bar textarea:focus,
+input[type="date"]:focus, .pw-wrap input:focus {
+  border-color: var(--purple);
+  box-shadow: 0 0 0 3px rgba(139,92,246,.18);
+}
+.field input, .field select, .field textarea {
+  transition: border-color .18s, box-shadow .18s;
+}
+
+/* ---- auth card accent ---- */
+.auth-card { position: relative; overflow: hidden; box-shadow: 0 24px 80px rgba(0,0,0,.5), 0 0 0 1px rgba(139,92,246,.08); }
+.auth-card::before {
+  content: ""; position: absolute; top: 0; left: 0; right: 0; height: 3px;
+  background: linear-gradient(90deg, var(--purple), var(--blue), var(--cyan));
+}
+.auth-card::after {
+  content: ""; position: absolute; inset: 0; pointer-events: none;
+  background: radial-gradient(400px 160px at 50% -10%, rgba(139,92,246,.14), transparent 70%);
+}
+.auth-card > * { position: relative; z-index: 1; }
+
+/* ---- chat polish ---- */
+.msg { box-shadow: 0 2px 8px rgba(0,0,0,.18); }
+.msg.bot { background: linear-gradient(180deg, var(--card-hover), var(--card)); }
+.chat-main { box-shadow: 0 12px 40px rgba(0,0,0,.25); }
+.chat-item.active { box-shadow: inset 2px 0 0 var(--cyan); }
+.typing-dots { display: inline-flex; gap: 4px; padding: 4px 2px; }
+.typing-dots i {
+  width: 6px; height: 6px; border-radius: 50%; background: var(--cyan);
+  animation: typingBounce 1.2s infinite ease-in-out;
+}
+.typing-dots i:nth-child(2) { animation-delay: .15s; }
+.typing-dots i:nth-child(3) { animation-delay: .3s; }
+@keyframes typingBounce { 0%,60%,100% { transform: translateY(0); opacity:.5 } 30% { transform: translateY(-4px); opacity:1 } }
+
+/* ---- notification dot pulse ---- */
+.notif-dot { animation: notifPulse 2.4s infinite; }
+@keyframes notifPulse {
+  0%,100% { box-shadow: 0 0 0 0 rgba(34,211,238,.5); }
+  50% { box-shadow: 0 0 0 5px rgba(34,211,238,0); }
+}
+
+/* ---- welcome banner refinement ---- */
+.welcome { box-shadow: 0 16px 48px rgba(0,0,0,.3); }
+.welcome::after {
+  content: ""; position: absolute; right: -60px; top: -60px;
+  width: 220px; height: 220px; border-radius: 50%;
+  background: radial-gradient(circle, rgba(34,211,238,.12), transparent 70%);
+  pointer-events: none;
+}
+
+/* ---- misc polish ---- */
+.empty-state svg { opacity: .35; }
+.badge-dot { box-shadow: 0 0 8px rgba(34,211,238,.6); }
+.quiz-opt { transition: all .18s; }
+.quiz-opt:hover { transform: translateX(2px); }
+
+/* ---- mobile breathing room ---- */
+@media (max-width: 640px) {
+  #view { padding: 18px 14px; }
+  .welcome { padding: 24px 20px; }
+  .welcome h2 { font-size: 21px; }
+  .auth-page { padding: 14px; }
+  .auth-card { padding: 28px 20px; }
+}

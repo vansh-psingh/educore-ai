@@ -83,6 +83,7 @@ function updateAdminNav() {
     const a = document.createElement("a");
     a.className = "nav-item nav-item-admin";
     a.href = "/admin";
+    a.title = "Admin dashboard";
     a.innerHTML = icon("settings") + "<span>Admin</span>";
     const sep = nav.querySelector(".nav-divider");
     nav.insertBefore(a, sep || null);
@@ -93,7 +94,7 @@ function renderNav() {
   const nav = document.getElementById("nav");
   nav.innerHTML = NAV.map(n => n.view === "_sep"
     ? '<div class="nav-divider"></div>'
-    : `<a class="nav-item" data-view="${n.view}" href="#/${n.view}">${icon(n.icon)}<span>${n.label}</span></a>`
+    : `<a class="nav-item" data-view="${n.view}" href="#/${n.view}" title="${n.label}">${icon(n.icon)}<span>${n.label}</span></a>`
   ).join("");
 }
 
@@ -273,7 +274,7 @@ function vOverview(root) {
   <div class="view">
     <div class="welcome">
       <span class="ai-badge">${icon("sparkles")} AI POWERED</span>
-      <h2>Welcome back, Student!</h2>
+      <h2>Welcome back${state.user && state.user.name ? ", " + esc(state.user.name.split(" ")[0]) : ""}!</h2>
       <p>What would you like to learn today?</p>
     </div>
 
