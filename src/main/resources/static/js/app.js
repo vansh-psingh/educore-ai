@@ -1632,7 +1632,36 @@ function vSettings(root) {
       </div>
       <div class="card">
         <div class="section-title" style="margin-top:0">${icon("bell")} Notifications</div>
-        <p class="muted">Study reminders and progress alerts - coming soon. The notifications panel will light up when the backend supports it.</p>
+        <p class="muted" style="margin-bottom:14px">Choose what EDUCORE AI can notify you about.</p>
+        <div id="notifPrefs">
+          <div class="notif-row">
+            <div class="notif-info">
+              <div class="notif-title">Daily Study Reminders</div>
+              <div class="muted notif-desc">Get daily nudges to stay on track with your study goals.</div>
+              <input type="time" id="npTime" class="notif-time" value="19:00">
+            </div>
+            <label class="switch"><input type="checkbox" id="npReminders"><span class="slider"></span></label>
+          </div>
+          <div class="notif-row">
+            <div class="notif-info">
+              <div class="notif-title">Progress &amp; Streak Alerts</div>
+              <div class="muted notif-desc">Receive updates on completed topics, milestones, and weekly study summaries.</div>
+            </div>
+            <label class="switch"><input type="checkbox" id="npProgress"><span class="slider"></span></label>
+          </div>
+          <div class="notif-row">
+            <div class="notif-info">
+              <div class="notif-title">Quiz &amp; AI Recommendations</div>
+              <div class="muted notif-desc">Get notified when new practice quizzes or personalized study tips are ready.</div>
+            </div>
+            <label class="switch"><input type="checkbox" id="npQuiz"><span class="slider"></span></label>
+          </div>
+          <div class="notif-perm">
+            <span class="badge" id="npPermBadge">checking…</span>
+            <button class="btn btn-ghost btn-sm" id="npPermBtn">Enable Browser Alerts</button>
+          </div>
+          <div class="muted" id="npSaved" style="font-size:12px;margin-top:10px;min-height:14px"></div>
+        </div>
       </div>
       <div class="card cp-card">
         <div class="section-title" style="margin-top:0">${icon("settings")} Change password</div>
@@ -1662,6 +1691,7 @@ function vSettings(root) {
   });
 
   loadProfileForm();
+  initNotifPrefs();
 
   document.getElementById("cpGo").addEventListener("click", async () => {
     const ok = document.getElementById("cpOk");
@@ -1676,6 +1706,94 @@ function vSettings(root) {
       document.getElementById("cpCur").value = "";
       document.getElementById("cpNew").value = "";
     } catch (e) { err.textContent = e.message; }
+  });
+}
+
+/* ---------- Settings: notification preferences ---------- */
+
+function initNotifPrefs() {
+  const LS_KEY = "educore_notif_prefs";
+  const TOGGLES = { reminders: "npReminders", progress: "npProgress", quiz: "npQuiz" };
+  const defaults = { reminders: false, reminders_time: "19:00", progress: false, quiz: false };
+
+  let savedTimer = null;
+  const timeEl = document.getElementById("npTime");
+  const savedEl = document.getElementById("npSaved");
+
+  const collect = () => ({
+    reminders: document.getElementById(TOGGLES.reminders).checked,
+    reminders_time: timeEl.value || "19:00",
+    progress: document.getElementById(TOGGLES.progress).checked,
+    quiz: document.getElementById(TOGGLES.quiz).checked
+  });
+
+  const flashSaved = () => {
+    savedEl.textContent = "Preferences saved";
+    savedEl.style.color = "#22c55e";
+    clearTimeout(savedTimer);
+    savedTimer = setTimeout(() => { savedEl.textContent = ""; }, 2000);
+  };
+
+  const persist = (p) => {
+    try { localStorage.setItem(LS_KEY, JSON.stringify(p)); } catch {}
+    API.profileUpdate({ notification_prefs: p }).catch(() => {});
+    flashSaved();
+  };
+
+  const apply = (p) => {
+    p = { ...defaults, ...(p || {}) };
+    for (const k of Object.keys(TOGGLES)) {
+      document.getElementById(TOGGLES[k]).checked = !!p[k];
+    }
+    if (p.reminders_time) timeEl.value = p.reminders_time;
+    return p;
+  };
+
+  // instant paint from localStorage, then server profile wins if present
+  let prefs = defaults;
+  try { prefs = { ...defaults, ...JSON.parse(localStorage.getItem(LS_KEY) || "{}") }; } catch {}
+  apply(prefs);
+  API.profile().then(r => {
+    const sp = r && r.notification_prefs;
+    if (sp && typeof sp === "object") {
+      prefs = apply(sp);
+      try { localStorage.setItem(LS_KEY, JSON.stringify(prefs)); } catch {}
+    }
+  }).catch(() => {});
+
+  const updatePermBadge = () => {
+    const badge = document.getElementById("npPermBadge");
+    if (!("Notification" in window)) {
+      badge.textContent = "Not supported"; badge.style.color = "var(--text-2)"; return;
+    }
+    const p = Notification.permission;
+    badge.textContent = p === "granted" ? "Enabled" : p === "denied" ? "Blocked in browser" : "Not enabled";
+    badge.style.color = p === "granted" ? "#22c55e" : p === "denied" ? "#f59e0b" : "var(--text-2)";
+  };
+  updatePermBadge();
+
+  const maybeRequestPerm = async () => {
+    if (!("Notification" in window)) return;
+    if (Notification.permission === "default") {
+      try { await Notification.requestPermission(); } catch {}
+      updatePermBadge();
+    }
+  };
+
+  for (const k of Object.keys(TOGGLES)) {
+    document.getElementById(TOGGLES[k]).addEventListener("change", e => {
+      persist(collect());
+      if (e.target.checked) maybeRequestPerm();
+    });
+  }
+  timeEl.addEventListener("change", () => persist(collect()));
+
+  document.getElementById("npPermBtn").addEventListener("click", async () => {
+    if (!("Notification" in window)) { toast("Browser notifications are not supported here."); return; }
+    try { await Notification.requestPermission(); } catch {}
+    updatePermBadge();
+    if (Notification.permission === "granted") toast("Browser alerts enabled.");
+    else if (Notification.permission === "denied") toast("Notifications are blocked in your browser settings.");
   });
 }
 

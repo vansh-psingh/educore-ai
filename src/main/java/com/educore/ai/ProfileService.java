@@ -186,6 +186,15 @@ public final class ProfileService {
                 u == null ? "" : u.path("mobile_verified_at").asText(""));
         out.put("mobile_status", MobileService.status(u));
         out.put("theme", u == null ? "dark" : u.path("theme").asText("dark"));
+        // notification preferences (optional; defaults when unset)
+        JsonNode np = u == null ? null : u.get("notification_prefs");
+        ObjectNode prefs = MAPPER.createObjectNode();
+        prefs.put("reminders", np != null && np.path("reminders").asBoolean(false));
+        prefs.put("reminders_time",
+                np == null ? "19:00" : np.path("reminders_time").asText("19:00"));
+        prefs.put("progress", np != null && np.path("progress").asBoolean(false));
+        prefs.put("quiz", np != null && np.path("quiz").asBoolean(false));
+        out.set("notification_prefs", prefs);
         return out;
     }
 
@@ -218,6 +227,25 @@ public final class ProfileService {
             if (!THEMES.contains(t))
                 throw new IllegalArgumentException("Theme must be 'dark' or 'light'.");
             un.put("theme", t);
+        }
+
+        // optional notification preferences (validated, stored on user record)
+        if (req.has("notification_prefs")) {
+            JsonNode np = req.get("notification_prefs");
+            if (np == null || !np.isObject())
+                throw new IllegalArgumentException("notification_prefs must be an object.");
+            ObjectNode clean = MAPPER.createObjectNode();
+            for (String k : new String[]{"reminders", "progress", "quiz"}) {
+                JsonNode v = np.get(k);
+                if (v != null && !v.isBoolean())
+                    throw new IllegalArgumentException(k + " must be true or false.");
+                clean.put(k, v != null && v.asBoolean());
+            }
+            String time = np.path("reminders_time").asText("19:00");
+            if (!time.matches("^([01]\\d|2[0-3]):[0-5]\\d$"))
+                throw new IllegalArgumentException("Reminder time must be HH:MM (24h).");
+            clean.put("reminders_time", time);
+            un.set("notification_prefs", clean);
         }
 
         un.put("profile_updated", Instant.now().toString());
