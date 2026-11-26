@@ -237,6 +237,68 @@ public final class Schema {
                     );
                     CREATE INDEX IF NOT EXISTS idx_essay_user   ON essay_submissions(user_id);
                     CREATE INDEX IF NOT EXISTS idx_essay_status ON essay_submissions(status);
+                    """),
+            new Migration(2, "learning-intelligence", """
+                    -- ============ quiz sessions (server-side key for honest scoring) ============
+                    CREATE TABLE IF NOT EXISTS quiz_sessions (
+                        id          text PRIMARY KEY,
+                        owner_id    text REFERENCES app_users(id) ON DELETE CASCADE,
+                        title       text NOT NULL DEFAULT '',
+                        subject     text NOT NULL DEFAULT '',
+                        topic       text NOT NULL DEFAULT '',
+                        payload     jsonb NOT NULL,
+                        seq         bigserial,
+                        created_at  timestamptz NOT NULL DEFAULT now()
+                    );
+                    CREATE INDEX IF NOT EXISTS idx_quizsess_user ON quiz_sessions(owner_id);
+
+                    -- ============ per-question attempt responses (mistake intelligence) ============
+                    CREATE TABLE IF NOT EXISTS attempt_responses (
+                        id           text PRIMARY KEY,
+                        owner_id     text REFERENCES app_users(id) ON DELETE CASCADE,
+                        source       text NOT NULL DEFAULT 'quiz'
+                                     CHECK (source IN ('quiz','exam','essay')),
+                        ref_id       text NOT NULL DEFAULT '',
+                        topic        text NOT NULL DEFAULT '',
+                        subject      text NOT NULL DEFAULT '',
+                        q_type       text NOT NULL DEFAULT '',
+                        question     text NOT NULL DEFAULT '',
+                        given        text NOT NULL DEFAULT '',
+                        correct      text NOT NULL DEFAULT '',
+                        marks        int NOT NULL DEFAULT 1,
+                        earned       int NOT NULL DEFAULT 0,
+                        correct_flag int NOT NULL DEFAULT 0,
+                        error_type   text NOT NULL DEFAULT '',
+                        payload      jsonb,
+                        seq          bigserial,
+                        created_at   timestamptz NOT NULL DEFAULT now()
+                    );
+                    CREATE INDEX IF NOT EXISTS idx_resp_user   ON attempt_responses(owner_id);
+                    CREATE INDEX IF NOT EXISTS idx_resp_topic  ON attempt_responses(owner_id, topic);
+                    CREATE INDEX IF NOT EXISTS idx_resp_source ON attempt_responses(owner_id, source);
+
+                    -- ============ spaced-repetition revision items ============
+                    CREATE TABLE IF NOT EXISTS revision_items (
+                        id              text PRIMARY KEY,
+                        owner_id        text REFERENCES app_users(id) ON DELETE CASCADE,
+                        subject         text NOT NULL DEFAULT '',
+                        topic           text NOT NULL DEFAULT '',
+                        status          text NOT NULL DEFAULT 'pending'
+                                        CHECK (status IN ('pending','reviewing','mastered')),
+                        ease            text NOT NULL DEFAULT '2.5',
+                        interval_days   int  NOT NULL DEFAULT 1,
+                        reps            int  NOT NULL DEFAULT 0,
+                        lapses          int  NOT NULL DEFAULT 0,
+                        due_date        text NOT NULL DEFAULT '',
+                        last_reviewed   timestamptz,
+                        payload         jsonb NOT NULL,
+                        seq             bigserial,
+                        created_at      timestamptz NOT NULL DEFAULT now(),
+                        updated_at      timestamptz NOT NULL DEFAULT now()
+                    );
+                    CREATE UNIQUE INDEX IF NOT EXISTS idx_rev_user_topic
+                        ON revision_items(owner_id, subject, topic);
+                    CREATE INDEX IF NOT EXISTS idx_rev_due ON revision_items(owner_id, due_date);
                     """)
     );
 

@@ -314,6 +314,13 @@ public final class WebServer {
                 resp.set("student_view", MAPPER.readTree(quiz.studentViewJson()));
                 resp.put("generation_mode", result.mode());
                 resp.put("disclaimer", AssessmentEngine.DISCLAIMER);
+                // persist session server-side so /api/quiz/submit can score honestly
+                String sessionId = QuizSessions.create(quiz, topic,
+                        req.path("subject").asText("General"),
+                        req.path("level").asText("General"),
+                        req.path("difficulty").asText("standard"),
+                        req.path("source").asText(""), authUser);
+                resp.put("session_id", sessionId);
                 if (req.path("include_answers").asBoolean(false)) {
                     resp.set("answer_key", MAPPER.readTree(quiz.answerKeyJson()));
                 }
@@ -322,6 +329,84 @@ public final class WebServer {
                 send(exchange, 400, "{\"error\":\"" + escape(e.getMessage()) + "\"}", "application/json");
             } catch (Exception e) {
                 send(exchange, 400, "{\"error\":\"invalid request\"}", "application/json");
+            }
+        });
+
+        server.createContext("/api/quiz/submit", exchange -> {
+            if (preflight(exchange)) return;
+            cors(exchange);
+            if (!"POST".equals(exchange.getRequestMethod())) {
+                send(exchange, 405, "{\"error\":\"method not allowed\"}", "application/json");
+                return;
+            }
+            AuthService.AuthUser authUser = requireUser(exchange);
+            if (authUser == null) return;
+            try {
+                String body = new String(exchange.getRequestBody().readAllBytes(), StandardCharsets.UTF_8);
+                JsonNode req = MAPPER.readTree(body);
+                String sessionId = req.path("session_id").asText("").trim();
+                if (sessionId.isEmpty()) {
+                    send(exchange, 400, "{\"error\":\"session_id is required\"}", "application/json");
+                    return;
+                }
+                ObjectNode resp = QuizSessions.submit(sessionId, req.path("answers"), authUser);
+                send(exchange, 200, MAPPER.writeValueAsString(resp), "application/json; charset=UTF-8");
+            } catch (IllegalArgumentException e) {
+                send(exchange, 400, "{\"error\":\"" + escape(e.getMessage()) + "\"}", "application/json");
+            } catch (Exception e) {
+                send(exchange, 500, "{\"error\":\"quiz submit failed\"}", "application/json");
+            }
+        });
+
+        server.createContext("/api/insights", exchange -> {
+            if (preflight(exchange)) return;
+            cors(exchange);
+            AuthService.AuthUser authUser = requireUser(exchange);
+            if (authUser == null) return;
+            String path = exchange.getRequestURI().getPath();
+            String method = exchange.getRequestMethod();
+            try {
+                if (path.endsWith("/mistakes") && "GET".equals(method)) {
+                    send(exchange, 200, MAPPER.writeValueAsString(MistakeService.analyze(authUser)),
+                            "application/json; charset=UTF-8");
+                } else if (path.endsWith("/readiness") && "GET".equals(method)) {
+                    send(exchange, 200, MAPPER.writeValueAsString(InsightsService.readiness(authUser)),
+                            "application/json; charset=UTF-8");
+                } else if (path.endsWith("/dna") && "GET".equals(method)) {
+                    send(exchange, 200, MAPPER.writeValueAsString(InsightsService.dna(authUser)),
+                            "application/json; charset=UTF-8");
+                } else if (path.endsWith("/map") && "GET".equals(method)) {
+                    send(exchange, 200, MAPPER.writeValueAsString(InsightsService.conceptMap(authUser)),
+                            "application/json; charset=UTF-8");
+                } else if (path.endsWith("/revision") && "GET".equals(method)) {
+                    int seeded = RevisionService.seedFromWeakTopics(authUser);
+                    ObjectNode resp = RevisionService.dashboard(authUser);
+                    resp.put("seeded", seeded);
+                    send(exchange, 200, MAPPER.writeValueAsString(resp),
+                            "application/json; charset=UTF-8");
+                } else if (path.endsWith("/revision/review") && "POST".equals(method)) {
+                    String body = new String(exchange.getRequestBody().readAllBytes(), StandardCharsets.UTF_8);
+                    JsonNode req = MAPPER.readTree(body);
+                    JsonNode item = RevisionService.review(req.path("id").asText(""), authUser,
+                            Math.max(0, Math.min(5, req.path("quality").asInt(3))));
+                    send(exchange, 200, MAPPER.writeValueAsString(item), "application/json; charset=UTF-8");
+                } else if (path.endsWith("/revision/mark") && "POST".equals(method)) {
+                    String body = new String(exchange.getRequestBody().readAllBytes(), StandardCharsets.UTF_8);
+                    JsonNode req = MAPPER.readTree(body);
+                    JsonNode item = RevisionService.markRevised(req.path("id").asText(""), authUser);
+                    send(exchange, 200, MAPPER.writeValueAsString(item), "application/json; charset=UTF-8");
+                } else if (path.endsWith("/revision/planner") && "POST".equals(method)) {
+                    String body = new String(exchange.getRequestBody().readAllBytes(), StandardCharsets.UTF_8);
+                    JsonNode req = MAPPER.readTree(body);
+                    ObjectNode task = RevisionService.toPlannerTask(req.path("id").asText(""), authUser);
+                    send(exchange, 200, MAPPER.writeValueAsString(task), "application/json; charset=UTF-8");
+                } else {
+                    send(exchange, 404, "{\"error\":\"not found\"}", "application/json");
+                }
+            } catch (IllegalArgumentException e) {
+                send(exchange, 400, "{\"error\":\"" + escape(e.getMessage()) + "\"}", "application/json");
+            } catch (Exception e) {
+                send(exchange, 500, "{\"error\":\"insights request failed\"}", "application/json");
             }
         });
 

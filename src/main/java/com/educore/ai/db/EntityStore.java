@@ -98,7 +98,24 @@ public final class EntityStore {
                     cols("id", "id", "owner_id", "owner", "name", "name", "ext", "ext",
                             "mime", "type", "size_bytes", "size", "text_length", "text_length",
                             "created_at", "uploaded"),
-                    Set.of("size_bytes", "text_length")))
+                    Set.of("size_bytes", "text_length"))),
+            Map.entry("quiz_sessions.json", new Spec("quiz_sessions.json", "quiz_sessions", Shape.MAP, null, "id",
+                    cols("id", "id", "owner_id", "owner", "title", "title", "subject", "subject",
+                            "topic", "topic", "created_at", "created"),
+                    Set.of())),
+            Map.entry("attempt_responses.json", new Spec("attempt_responses.json", "attempt_responses", Shape.ARRAY, "items", null,
+                    cols("id", "id", "owner_id", "user", "source", "source", "ref_id", "ref",
+                            "topic", "topic", "subject", "subject", "q_type", "type",
+                            "question", "question", "given", "given", "correct", "correct",
+                            "marks", "marks", "earned", "earned", "correct_flag", "correct_flag",
+                            "error_type", "error_type", "created_at", "created"),
+                    Set.of("marks", "earned", "correct_flag"))),
+            Map.entry("revision_items.json", new Spec("revision_items.json", "revision_items", Shape.ARRAY, "items", null,
+                    cols("id", "id", "owner_id", "user", "subject", "subject", "topic", "topic",
+                            "status", "status", "ease", "ease", "interval_days", "interval",
+                            "reps", "reps", "lapses", "lapses", "due_date", "due",
+                            "created_at", "created", "updated_at", "updated"),
+                    Set.of("interval_days", "reps", "lapses")))
     );
 
     // ================= read =================

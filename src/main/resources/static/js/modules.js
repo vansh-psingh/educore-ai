@@ -712,10 +712,300 @@ async function openClassroom(id) {
   } catch (e) { toast(e.message); }
 }
 
+/* ============================ INSIGHTS ============================ */
+
+function vInsights(root) {
+  root.innerHTML = `
+  <div class="view">
+    <div class="view-header"><h2>Learning Insights</h2><p>Mistake intelligence, spaced revision, readiness and your learning profile - all computed from your real quiz and exam activity.</p></div>
+    <div id="insRoot"><div class="muted">Loading your learning data...</div></div>
+  </div>`;
+  loadInsights();
+}
+
+async function loadInsights() {
+  const el = document.getElementById("insRoot");
+  if (!el) return;
+  try {
+    const [mistakes, readiness, dna, map, revision] = await Promise.all([
+      API.insightsMistakes(), API.insightsReadiness(), API.insightsDNA(),
+      API.insightsMap(), API.insightsRevision()
+    ]);
+    el.innerHTML = `
+      ${renderReadiness(readiness)}
+      ${renderRevision(revision)}
+      ${renderMistakes(mistakes)}
+      ${renderDNA(dna)}
+      ${renderMap(map)}`;
+    bindInsightActions();
+  } catch (e) {
+    el.innerHTML = `<div class="card"><div class="auth-error">Could not load insights: ${esc(e.message)}</div>
+      <p class="muted">Insights appear after you answer quiz or exam questions - your responses are recorded automatically.</p></div>`;
+  }
+}
+
+/* ---------- readiness ---------- */
+
+function renderReadiness(r) {
+  const score = r.score || 0;
+  const C = 2 * Math.PI * 42;
+  const dash = (C * score) / 100;
+  const comp = r.components || {};
+  const bar = (label, val, hint) => `
+    <div class="ins-comp">
+      <div class="ins-comp-top"><span>${label}</span><strong>${val}%</strong></div>
+      <div class="ins-bar"><div class="ins-bar-fill" style="width:${Math.min(100, val)}%"></div></div>
+      ${hint ? `<div class="muted" style="font-size:11px">${hint}</div>` : ""}
+    </div>`;
+  return `
+  <div class="card">
+    <div class="section-title" style="margin-top:0">${icon("target")} Exam readiness</div>
+    <div class="ins-readiness">
+      <div class="ins-ring">
+        <svg viewBox="0 0 100 100" width="120" height="120">
+          <circle cx="50" cy="50" r="42" fill="none" stroke="rgba(148,163,184,.15)" stroke-width="9"/>
+          <circle cx="50" cy="50" r="42" fill="none" stroke="url(#insGrad)" stroke-width="9"
+            stroke-linecap="round" stroke-dasharray="${C.toFixed(1)}" stroke-dashoffset="${(C - dash).toFixed(1)}"
+            transform="rotate(-90 50 50)"/>
+          <defs><linearGradient id="insGrad" x1="0" y1="0" x2="1" y2="1">
+            <stop offset="0" stop-color="#8B5CF6"/><stop offset="1" stop-color="#22D3EE"/>
+          </linearGradient></defs>
+        </svg>
+        <div class="ins-ring-num"><strong>${score}</strong><span>/100</span></div>
+      </div>
+      <div style="flex:1;min-width:220px">
+        <div style="font-size:15px;font-weight:700">${esc(r.label || "-")}</div>
+        <div class="muted" style="font-size:12px;margin:4px 0 10px">${esc(r.disclaimer || "")}</div>
+        ${bar("Topic coverage", comp.topic_coverage_pct ?? r.coverage_pct ?? 0, `${r.attempts ?? 0} responses recorded`)}
+        ${bar("Answer accuracy", comp.accuracy_pct ?? r.accuracy_pct ?? 0, `${comp.accuracy_pct ?? 0}% of marks earned`)}
+        ${bar("Revision completion", comp.revision_completion_pct ?? r.revision_pct ?? 0, "spaced-repetition items done")}
+        ${bar("Recent activity", comp.recent_activity_score ?? 0, `${r.responses_7d ?? 0} responses in last 7 days`)}
+      </div>
+    </div>
+    <div class="grid grid-2" style="margin-top:14px">
+      <div><div class="section-title" style="font-size:13px">Needs attention</div>
+        ${(r.attention_topics || []).length ? r.attention_topics.map(t => `
+          <div class="ins-topic-row"><span>${esc(t.topic)}</span><span class="ins-acc bad">${t.accuracy_pct}%</span></div>`).join("")
+        : '<div class="muted">Not enough data yet.</div>'}</div>
+      <div><div class="section-title" style="font-size:13px">Strong topics</div>
+        ${(r.strong_topics || []).length ? r.strong_topics.map(t => `
+          <div class="ins-topic-row"><span>${esc(t.topic)}</span><span class="ins-acc good">${t.accuracy_pct}%</span></div>`).join("")
+        : '<div class="muted">Not enough data yet.</div>'}</div>
+    </div>
+  </div>`;
+}
+
+/* ---------- revision ---------- */
+
+function renderRevision(rv) {
+  const item = it => `
+    <div class="ins-rev-item">
+      <div style="flex:1;min-width:0">
+        <strong>${esc(it.topic)}</strong>
+        <span class="muted"> · ${esc(it.subject)} · due ${esc(it.due || "-")} · interval ${it.interval ?? 1}d · ${it.reps ?? 0} reps${it.lapses ? ` · ${it.lapses} lapse(s)` : ""}</span>
+      </div>
+      <div class="ins-rev-actions">
+        ${it.status !== "mastered" ? `
+          <button class="chip" data-rev-q="${it.id}" data-q="4" title="I recalled it well">good</button>
+          <button class="chip danger" data-rev-q="${it.id}" data-q="1" title="I forgot it">poor</button>
+          <button class="chip" data-rev-mark="${it.id}">done today</button>
+          <button class="chip" data-rev-plan="${it.id}">+planner</button>` :
+        `<span class="badge" style="background:#4ade8022;color:#4ade80">mastered</span>`}
+      </div>
+    </div>`;
+  return `
+  <div class="card">
+    <div class="section-title" style="margin-top:0">${icon("refresh")} Smart revision
+      <span class="muted" style="font-weight:400;font-size:12px"> · ${rv.pending ?? 0} pending${rv.overdue ? ` · <strong style="color:#f87171">${rv.overdue} overdue</strong>` : ""}</span>
+    </div>
+    <p class="muted" style="margin-top:0;font-size:12px">Spaced repetition over your weak topics - intervals grow when you recall well and reset when you struggle. Auto-seeded from your mistakes.</p>
+    ${(rv.due || []).length ? `<div class="section-title" style="font-size:13px;color:#f87171">Due now</div>${rv.due.map(item).join("")}` : ""}
+    ${(rv.upcoming || []).length ? `<div class="section-title" style="font-size:13px">Upcoming</div>${rv.upcoming.map(item).join("")}` : ""}
+    ${(rv.completed || []).length ? `<div class="section-title" style="font-size:13px">Completed / mastered</div>${rv.completed.slice(0, 10).map(item).join("")}` : ""}
+    ${!(rv.due || []).length && !(rv.upcoming || []).length && !(rv.completed || []).length ?
+      '<div class="muted">No revision items yet - they are seeded automatically from your quiz/exam mistakes.</div>' : ""}
+  </div>`;
+}
+
+/* ---------- mistakes ---------- */
+
+function renderMistakes(m) {
+  const errLabel = { conceptual: "Conceptual", calculation: "Calculation", procedural: "Procedural", incomplete: "Incomplete", essay: "Essay", correct: "Correct" };
+  return `
+  <div class="card">
+    <div class="section-title" style="margin-top:0">${icon("quiz")} Mistake intelligence
+      <span class="muted" style="font-weight:400;font-size:12px"> · ${m.total_responses ?? 0} answers analyzed · ${m.accuracy_pct ?? 0}% accuracy</span>
+    </div>
+    ${Object.keys(m.error_summary || {}).length ? `
+    <div class="ins-err-chips">${Object.entries(m.error_summary).map(([k, v]) =>
+      `<span class="chip">${errLabel[k] || k}: ${v}</span>`).join("")}</div>` : ""}
+    ${(m.repeated_mistakes || []).length ? `
+      <div class="section-title" style="font-size:13px">Repeatedly missed questions</div>
+      ${m.repeated_mistakes.map(x => `
+        <div class="ins-topic-row"><span title="${esc(x.question)}">${esc(x.question)}</span>
+        <span class="ins-acc bad">×${x.times_wrong}</span></div>`).join("")}` : ""}
+    ${(m.topics || []).length ? `
+      <div class="section-title" style="font-size:13px;margin-top:12px">Topic breakdown</div>
+      <table class="ins-table"><thead><tr><th>Topic</th><th>Subject</th><th>Attempts</th><th>Errors</th><th>Score</th><th>Status</th></tr></thead><tbody>
+      ${m.topics.slice(0, 15).map(t => `
+        <tr><td>${esc(t.topic)}</td><td>${esc(t.subject)}</td><td>${t.attempts}</td><td>${t.errors}</td>
+        <td>${t.score_pct}%</td>
+        <td><span class="ins-status st-${t.status}">${t.status}${t.improving ? " ↑" : ""}</span></td></tr>`).join("")}
+      </tbody></table>` : '<div class="muted">No responses recorded yet - take a quiz to start building insight.</div>'}
+    ${(m.recommendations || []).length ? `
+      <div class="section-title" style="font-size:13px;margin-top:12px">Recommended practice</div>
+      ${m.recommendations.map(rc => `
+        <div class="ins-topic-row"><span>${esc(rc.reason)}</span>
+        <button class="chip" data-practice="${esc(rc.topic)}">${esc(rc.action_label || "Practice")}</button></div>`).join("")}` : ""}
+  </div>`;
+}
+
+/* ---------- learning DNA ---------- */
+
+function renderDNA(d) {
+  const trendArrow = t => t > 0 ? `<span style="color:#4ade80">▲${t}</span>` : t < 0 ? `<span style="color:#f87171">▼${Math.abs(t)}</span>` : `<span class="muted">→0</span>`;
+  return `
+  <div class="card">
+    <div class="section-title" style="margin-top:0">${icon("sparkles")} Learning DNA</div>
+    ${(d.subjects || []).length ? `
+      <div class="section-title" style="font-size:13px">Subject performance</div>
+      ${d.subjects.map(s => `
+        <div class="ins-comp">
+          <div class="ins-comp-top"><span>${esc(s.subject)}</span>
+            <strong>${s.accuracy_pct}% <span class="muted" style="font-weight:400">· ${s.attempts} attempts · trend ${trendArrow(s.trend_pct)}</span></strong></div>
+          <div class="ins-bar"><div class="ins-bar-fill" style="width:${s.accuracy_pct}%"></div></div>
+        </div>`).join("")}` : '<div class="muted">No subject data yet.</div>'}
+    <div class="grid grid-2" style="margin-top:14px">
+      <div>
+        <div class="section-title" style="font-size:13px">Consistency</div>
+        <div class="ins-topic-row"><span>Active days (last 14)</span><strong>${d.consistency?.active_days_14d ?? 0}/14</strong></div>
+        <div class="ins-topic-row"><span>Consistency</span><strong>${d.consistency?.consistency_pct ?? 0}%</strong></div>
+        <div class="ins-topic-row"><span>Activity span</span><strong>${d.consistency?.activity_span_days ?? 0} days</strong></div>
+        <div class="ins-topic-row"><span>Responses/day</span><strong>${d.consistency?.responses_per_day ?? 0}</strong></div>
+      </div>
+      <div>
+        <div class="section-title" style="font-size:13px">Mistake mix</div>
+        ${Object.keys(d.mistake_frequency || {}).length ? Object.entries(d.mistake_frequency).map(([k, v]) =>
+          `<div class="ins-topic-row"><span>${esc(k)}</span><strong>${v}</strong></div>`).join("")
+        : '<div class="muted">No mistakes recorded.</div>'}
+      </div>
+    </div>
+    ${(d.topic_mastery || []).length ? `
+      <div class="section-title" style="font-size:13px;margin-top:12px">Topic mastery</div>
+      ${d.topic_mastery.map(t => `
+        <div class="ins-comp">
+          <div class="ins-comp-top"><span>${esc(t.topic)} <span class="muted" style="font-weight:400">(${t.attempts} tries)</span></span><strong>${t.mastery_pct}%</strong></div>
+          <div class="ins-bar"><div class="ins-bar-fill" style="width:${t.mastery_pct}%"></div></div>
+        </div>`).join("")}` : ""}
+    ${(d.recommendations || []).length ? `
+      <div class="section-title" style="font-size:13px;margin-top:12px">For you</div>
+      ${d.recommendations.map(rc => `<div class="ins-topic-row"><span>${esc(rc.text)}</span></div>`).join("")}` : ""}
+  </div>`;
+}
+
+/* ---------- concept map ---------- */
+
+function renderMap(m) {
+  const nodes = m.nodes || [], edges = m.edges || [];
+  if (!nodes.length) {
+    return `<div class="card"><div class="section-title" style="margin-top:0">${icon("target")} Concept map</div>
+      <div class="muted">${esc(m.note || "No topics yet.")} Answer quiz/exam questions or add planner tasks to populate your map.</div></div>`;
+  }
+  // layout: subjects on left column, topics on right, grouped by subject
+  const bySubject = {};
+  nodes.forEach(n => { if (n.type === "topic") (bySubject[n.subject] = bySubject[n.subject] || []).push(n); });
+  const subjects = nodes.filter(n => n.type === "subject");
+  const W = 860, rowH = 46, subjX = 30, topX = 300;
+  const totalRows = Math.max(...Object.values(bySubject).map(a => a.length), 1);
+  const H = Math.max(220, subjects.length * rowH + 40);
+  const subjY = {};
+  const subjStep = subjects.length > 1 ? (H - 60) / (subjects.length - 1) : 0;
+  subjects.forEach((s, i) => subjY[s.id] = 30 + i * subjStep);
+  // distribute topic rows evenly in right area per subject block
+  const topicPos = {};
+  let cursor = 30;
+  subjects.forEach(s => {
+    const topics = bySubject[s.label] || [];
+    const blockH = Math.max(rowH, (H - 60) * (topics.length / totalRows));
+    topics.forEach((t, i) => {
+      topicPos[t.id] = { x: topX + 40, y: cursor + (i + 0.5) * (blockH / Math.max(1, topics.length)) };
+    });
+    cursor += blockH;
+  });
+  const color = { completed: "#4ade80", weak: "#f87171", pending: "#94a3b8" };
+  const edgePaths = edges.filter(e => e.kind === "contains").map(e => {
+    const a = { x: subjX + 90, y: subjY[e.from] || 0 };
+    const b = topicPos[e.to] || { x: 0, y: 0 };
+    const mx = (a.x + b.x) / 2;
+    return `<path d="M${a.x},${a.y} C${mx},${a.y} ${mx},${b.y} ${b.x - 8},${b.y}" fill="none" stroke="rgba(139,92,246,.35)" stroke-width="1.5"/>`;
+  }).join("");
+  const subjNodes = subjects.map(s => `
+    <g><rect x="${subjX}" y="${(subjY[s.id] || 0) - 16}" width="180" height="32" rx="8"
+      fill="rgba(139,92,246,.15)" stroke="rgba(139,92,246,.5)"/>
+      <text x="${subjX + 90}" y="${(subjY[s.id] || 0) + 4}" text-anchor="middle" fill="#e2e8f0" font-size="12" font-weight="600">${esc(s.label)}</text></g>`).join("");
+  const topicNodes = nodes.filter(n => n.type === "topic").map(t => {
+    const p = topicPos[t.id] || { x: 0, y: 0 };
+    const c = color[t.status] || "#94a3b8";
+    const acc = t.accuracy_pct > 0 ? ` · ${t.accuracy_pct}%` : "";
+    return `<g>
+      <circle cx="${p.x}" cy="${p.y}" r="7" fill="${c}" opacity=".9"/>
+      <text x="${p.x + 12}" y="${p.y + 4}" fill="#cbd5e1" font-size="11">${esc(t.label)}${acc}</text>
+      <title>${esc(t.label)} - ${t.status}${acc} (${t.attempts} attempts)</title>
+    </g>`;
+  }).join("");
+  const legend = `<div class="ins-legend">
+    <span><i style="background:#4ade80"></i>completed (≥70%)</span>
+    <span><i style="background:#f87171"></i>weak (&lt;40%)</span>
+    <span><i style="background:#94a3b8"></i>pending</span></div>`;
+  const rec = (m.recommended_next || []).length ? `
+    <div class="section-title" style="font-size:13px;margin-top:10px">Recommended next</div>
+    <div class="chips">${m.recommended_next.map(t =>
+      `<span class="chip">${esc(t.topic)} <span class="muted">(${esc(t.subject)})</span></span>`).join("")}</div>` : "";
+  return `<div class="card">
+    <div class="section-title" style="margin-top:0">${icon("target")} Concept map</div>
+    <p class="muted" style="margin-top:0;font-size:12px">${esc(m.note || "")}</p>
+    ${legend}
+    <div style="overflow-x:auto"><svg viewBox="0 0 ${W} ${H}" width="100%" style="min-width:640px">${edgePaths}${subjNodes}${topicNodes}</svg></div>
+    ${rec}
+  </div>`;
+}
+
+/* ---------- insight actions ---------- */
+
+function bindInsightActions() {
+  // revision quality review / mark / planner
+  document.querySelectorAll("[data-rev-q]").forEach(b =>
+    b.addEventListener("click", async () => {
+      b.disabled = true;
+      try { await API.insightsRevisionReview(b.dataset.revQ, +b.dataset.q); toast("Revision recorded - schedule updated."); loadInsights(); }
+      catch (e) { toast(e.message); b.disabled = false; }
+    }));
+  document.querySelectorAll("[data-rev-mark]").forEach(b =>
+    b.addEventListener("click", async () => {
+      b.disabled = true;
+      try { await API.insightsRevisionMark(b.dataset.revMark); toast("Marked as revised."); loadInsights(); }
+      catch (e) { toast(e.message); b.disabled = false; }
+    }));
+  document.querySelectorAll("[data-rev-plan]").forEach(b =>
+    b.addEventListener("click", async () => {
+      b.disabled = true;
+      try { await API.insightsRevisionPlanner(b.dataset.revPlan); toast("Added to your study planner."); }
+      catch (e) { toast(e.message); }
+      b.disabled = false;
+    }));
+  // practice shortcut -> quiz generator
+  document.querySelectorAll("[data-practice]").forEach(b =>
+    b.addEventListener("click", () => {
+      location.hash = "#/quiz";
+      setTimeout(() => { const t = document.getElementById("qTopic"); if (t) { t.value = b.dataset.practice; t.dispatchEvent(new Event("input")); } }, 300);
+    }));
+}
+
 /* register module views */
 Object.assign(VIEWS, {
   exams: vExams,
   documents: vDocuments,
   planner: vPlanner,
   classrooms: vClassrooms,
+  insights: vInsights,
 });

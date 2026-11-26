@@ -124,6 +124,8 @@ public final class ExamService {
 
         int got = 0, total = 0;
         ArrayNode review = MAPPER.createArrayNode();
+        java.util.List<JsonNode> recorded = new java.util.ArrayList<>();
+        String examSubject = exam.path("subject").asText("General");
         for (JsonNode k : key) {
             int num = k.path("number").asInt();
             int marks = k.path("marks").asInt(1);
@@ -131,6 +133,8 @@ public final class ExamService {
             String correct = k.path("correct_answer").asText("");
             String given = answers.path(String.valueOf(num)).asText("").trim();
             String qType = findType(exam, num);
+            String topic = findTopic(exam, num);
+            String qText = findQuestionText(exam, num);
 
             int earned = 0;
             boolean ok = false;
@@ -141,7 +145,7 @@ public final class ExamService {
                 // always flagged as an AI suggestion pending teacher review
                 try {
                     ObjectNode ereq = MAPPER.createObjectNode();
-                    ereq.put("question", findQuestionText(exam, num));
+                    ereq.put("question", qText);
                     ereq.put("answer", given);
                     ereq.put("subject", exam.path("subject").asText("General"));
                     ereq.put("level", exam.path("level").asText("General"));
@@ -176,7 +180,18 @@ public final class ExamService {
                 if (essayEval != null) r.set("evaluation", essayEval);
                 r.put("note", EssayService.DISCLAIMER);
             }
+
+            // per-question analytics feed (mistake intelligence + revision)
+            Responses.recordScored(user, "exam", id, topic, examSubject, qType,
+                    qText, given, correct, marks, earned, ok);
+            ObjectNode rec = MAPPER.createObjectNode();
+            rec.put("topic", topic);
+            rec.put("subject", examSubject);
+            rec.put("correct_flag", ok ? 1 : 0);
+            recorded.add(rec);
         }
+
+        RevisionService.onResponsesRecorded(user, recorded);
 
         int pct = total == 0 ? 0 : (int) Math.round(100.0 * got / total);
 
@@ -197,6 +212,7 @@ public final class ExamService {
         att.put("marks", got + "/" + total);
         att.put("date", java.time.Instant.now().toString());
         att.put("owner", exam.path("owner").asText(""));
+        att.set("review", review); // per-question detail for insights
         Store.write("exam_history.json", hist);
 
         ObjectNode out = MAPPER.createObjectNode();
@@ -238,6 +254,16 @@ public final class ExamService {
             }
         }
         return "";
+    }
+
+    private static String findTopic(JsonNode exam, int num) {
+        for (JsonNode q : exam.path("questions")) {
+            if (q.path("number").asInt() == num) {
+                String t = q.path("topic").asText("");
+                return t.isEmpty() ? "General" : t;
+            }
+        }
+        return "General";
     }
 
     private static boolean score(String given, String correct, String type) {

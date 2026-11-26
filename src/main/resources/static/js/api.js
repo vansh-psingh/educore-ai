@@ -247,7 +247,18 @@ const API = {
 
   // edu.core engines (local, deterministic)
   quiz(payload) { return this.post("/api/quiz", payload); },
+  quizSubmit(sessionId, answers) { return this.post("/api/quiz/submit", { session_id: sessionId, answers }); },
   report() { return this.post("/api/report", {}); },
+
+  // learning intelligence
+  async insightsMistakes() { return this.get("/api/insights/mistakes"); },
+  async insightsReadiness() { return this.get("/api/insights/readiness"); },
+  async insightsDNA() { return this.get("/api/insights/dna"); },
+  async insightsMap() { return this.get("/api/insights/map"); },
+  async insightsRevision() { return this.get("/api/insights/revision"); },
+  insightsRevisionReview(id, quality) { return this.post("/api/insights/revision/review", { id, quality }); },
+  insightsRevisionMark(id) { return this.post("/api/insights/revision/mark", { id }); },
+  insightsRevisionPlanner(id) { return this.post("/api/insights/revision/planner", { id }); },
 
   // exams
   examGenerate(payload) { return this.post("/api/exams/generate", payload); },

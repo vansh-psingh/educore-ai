@@ -13,6 +13,7 @@ const NAV = [
   { view: "exams",        icon: "exams",      label: "Exams" },
   { view: "documents",    icon: "documents",  label: "Document Library" },
   { view: "progress",     icon: "progress",   label: "Learning Progress" },
+  { view: "insights",     icon: "target",     label: "Insights" },
   { view: "planner",      icon: "planner",    label: "Study Planner" },
   { view: "classrooms",   icon: "classrooms", label: "Classrooms" },
   { view: "_sep" },
@@ -24,7 +25,7 @@ const TITLES = {
   overview: "Overview", tutor: "AI Tutor", workspace: "Study Workspace",
   notes: "Notes Generator", summarizer: "Summarizer", quiz: "Quiz Generator",
   exams: "Exams", documents: "Document Library", progress: "Learning Progress",
-  planner: "Study Planner", classrooms: "Classrooms",
+  insights: "Learning Insights", planner: "Study Planner", classrooms: "Classrooms",
   notifications: "Notifications", settings: "Settings",
   login: "Sign in", register: "Create account",
   forgot: "Reset password", reset: "Set new password",
@@ -1067,10 +1068,9 @@ function vQuiz(root) {
         level: document.getElementById("qLevel").value,
         difficulty: document.getElementById("qDiff").value,
         count: +document.getElementById("qCount").value || 5,
-        source: document.getElementById("qSource").value,
-        include_answers: true   // fetched once; key hidden client-side until submit
+        source: document.getElementById("qSource").value
       });
-      state.quiz = { student: r.student_view, key: r.answer_key, answers: {}, submitted: false, mode: r.generation_mode || "notes" };
+      state.quiz = { student: r.student_view, sessionId: r.session_id, answers: {}, submitted: false, mode: r.generation_mode || "notes" };
       state.quizDisclaimer = r.disclaimer;
       renderQuiz();
     } catch (e) {
@@ -1123,29 +1123,29 @@ function renderQuiz() {
     inp.addEventListener("input", () => { q.answers[inp.dataset.q] = inp.value; });
   });
 
-  document.getElementById("qSubmit").addEventListener("click", () => {
+  document.getElementById("qSubmit").addEventListener("click", async () => {
+    if (q.submitted) return;
     q.submitted = true;
-    // score
-    const keyMap = {};
-    (q.key?.questions || []).forEach(k => keyMap[k.number] = k);
-    let got = 0, total = 0;
-    sv.questions.forEach(qq => {
-      const k = keyMap[qq.number];
-      if (!k) return;
-      total += k.marks;
-      const ans = (q.answers[qq.number] || "").trim().toLowerCase();
-      const correct = (k.correct_answer || "").trim().toLowerCase();
-      // MCQ/TF exact match; short answer: keyword overlap >= 50%
-      let ok = ans === correct;
-      if (!ok && qq.type === "short_answer" && ans) {
-        const kw = correct.split(/[^a-z0-9]+/).filter(w => w.length > 3);
-        const hits = kw.filter(w => ans.includes(w)).length;
-        ok = kw.length > 0 && hits / kw.length >= 0.5;
-      }
-      if (ok) got += k.marks;
-    });
-    q.score = total ? Math.round(100 * got / total) : 0;
-    renderQuizResult(sv, keyMap, got, total);
+    const btn = document.getElementById("qSubmit");
+    btn.disabled = true;
+    btn.textContent = "Scoring...";
+    try {
+      // server-side scoring - answer key never leaves the backend
+      const r = await API.quizSubmit(q.sessionId, q.answers);
+      const keyMap = {};
+      let got = 0, total = 0;
+      (r.review || []).forEach(k => {
+        keyMap[k.number] = k;
+        got += k.earned || 0;
+        total += k.marks || 0;
+      });
+      renderQuizResult(sv, keyMap, got, total);
+    } catch (e) {
+      q.submitted = false;
+      btn.disabled = false;
+      btn.textContent = "Submit answers";
+      toast("Submit failed: " + e.message);
+    }
   });
 
   document.getElementById("qRetake").addEventListener("click", () => {
