@@ -10,7 +10,7 @@ const API_BASE = (() => {
     if (saved !== null) return saved;
   } catch (e) { /* ignore */ }
   return /(^|\.)(web\.app|firebaseapp\.com)$/.test(location.hostname)
-    ? "https://quebec-pierce-admit-ever.trycloudflare.com"   // Cloudflare quick tunnel -> local backend
+    ? "https://attempting-recorders-joel-oval.trycloudflare.com"   // Cloudflare quick tunnel -> local backend
     : "";
 })();
 
@@ -99,8 +99,63 @@ const API = {
   },
 
   // local JSON-driven engine (always works)
-  chatLocal(message) {
-    return this.post("/api/chat", { message });
+  chatLocal(message) { return this.post("/api/chat", { message }); },
+
+  // persistent conversation history
+  async chatSessions() {
+    const res = await fetch(API_BASE + "/api/chat/sessions", { credentials: "include", headers: authHeaders() });
+    return res.json();
+  },
+  async chatHistory(sessionId) {
+    const res = await fetch(API_BASE + "/api/chat/history?session_id=" + encodeURIComponent(sessionId),
+      { credentials: "include", headers: authHeaders() });
+    return res.json();
+  },
+  chatClear(sessionId) {
+    return this.post("/api/chat/history?session_id=" + encodeURIComponent(sessionId), {});
+  },
+
+  // long-answer essay evaluation
+  essayEvaluate(payload) { return this.post("/api/essays/evaluate", payload); },
+  async essays(limit) {
+    const res = await fetch(API_BASE + "/api/essays" + (limit ? "?limit=" + limit : ""),
+      { credentials: "include", headers: authHeaders() });
+    return res.json();
+  },
+  async essay(id) {
+    const res = await fetch(API_BASE + "/api/essays/" + id, { credentials: "include", headers: authHeaders() });
+    return res.json();
+  },
+  essayFinalize(id, payload) { return this.post(`/api/essays/${id}/finalize`, payload); },
+
+  // notifications
+  async notifications() {
+    const res = await fetch(API_BASE + "/api/notifications", { credentials: "include", headers: authHeaders() });
+    return res.json();
+  },
+
+  // admin
+  async adminOverview() { return this.get("/api/admin/overview"); },
+  async adminHealth() { return this.get("/api/admin/health"); },
+  async adminUsers(params) {
+    const q = new URLSearchParams(params || {}).toString();
+    return this.get("/api/admin/users" + (q ? "?" + q : ""));
+  },
+  async adminUser(id) { return this.get("/api/admin/users/" + id); },
+  adminUserUpdate(id, patch) { return this.post(`/api/admin/users/${id}/update`, patch); },
+  async adminAudit(limit) { return this.get("/api/admin/audit?limit=" + (limit || 100)); },
+  async adminNotifications() { return this.get("/api/admin/notifications"); },
+  adminNotify(payload) { return this.post("/api/admin/notifications", payload); },
+
+  async get(path) {
+    const res = await fetch(API_BASE + path, { credentials: "include", headers: authHeaders() });
+    const data = await res.json().catch(() => null);
+    if (!res.ok) {
+      const err = new Error(data?.error || `HTTP ${res.status}`);
+      err.status = res.status;
+      throw err;
+    }
+    return data;
   },
 
   // OpenAI/Gemini-backed endpoints (require API key in backend .env)

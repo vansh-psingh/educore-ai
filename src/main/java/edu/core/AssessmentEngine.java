@@ -46,7 +46,7 @@ public class AssessmentEngine {
                 Question q = switch (type) {
                     case MCQ -> buildDefinitionMcq(facts, pool, difficulty);
                     case TRUE_FALSE -> buildTrueFalse(facts, pool);
-                    case SHORT_ANSWER -> buildShortAnswer(pool);
+                    case SHORT_ANSWER, LONG_ANSWER -> buildShortAnswer(pool);
                 };
                 if (q != null) questions.add(q);
             }

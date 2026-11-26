@@ -10,13 +10,8 @@ public final class AIProvider {
     private static final com.fasterxml.jackson.databind.ObjectMapper MAPPER =
             new com.fasterxml.jackson.databind.ObjectMapper();
 
-    /** Small in-memory response cache: identical prompts return instantly. */
-    private static final int CACHE_MAX = 200;
-    private static final long CACHE_TTL_MS = 10 * 60 * 1000;
-    private static final java.util.concurrent.ConcurrentHashMap<String, CacheEntry> CACHE =
-            new java.util.concurrent.ConcurrentHashMap<>();
-
-    private record CacheEntry(String text, long at) {}
+    /** Bounded TTL cache; keys are user-scoped so no data leaks across users. */
+    private static final TtlCache CACHE = new TtlCache(10 * 60 * 1000, 200);
 
     private AIProvider() {
     }
@@ -27,10 +22,20 @@ public final class AIProvider {
 
     public static String generate(String instructions, String input)
             throws OpenAIService.OpenAIException {
-        String cacheKey = providerName() + "|" + instructions.hashCode() + "|" + input.hashCode();
-        CacheEntry hit = CACHE.get(cacheKey);
-        if (hit != null && System.currentTimeMillis() - hit.at() < CACHE_TTL_MS) {
-            return hit.text();
+        return generateForUser("", instructions, input);
+    }
+
+    /**
+     * Generates with an optional user id. The cache key is namespaced by user
+     * so identical prompts from different users never share cached output.
+     */
+    public static String generateForUser(String userId, String instructions, String input)
+            throws OpenAIService.OpenAIException {
+        String cacheKey = "ai:" + (userId == null ? "anon" : userId) + "|"
+                + providerName() + "|" + instructions.hashCode() + "|" + input.hashCode();
+        String hit = CACHE.get(cacheKey);
+        if (hit != null) {
+            return hit;
         }
         String text;
         if (isOpenAI()) {
@@ -41,11 +46,13 @@ public final class AIProvider {
             throw new OpenAIService.OpenAIException(503,
                     "AI service is not configured (set OPENAI_API_KEY or GEMINI_API_KEY in .env).");
         }
-        if (CACHE.size() >= CACHE_MAX) {
-            CACHE.clear();
-        }
-        CACHE.put(cacheKey, new CacheEntry(text, System.currentTimeMillis()));
+        CACHE.put(cacheKey, text);
         return text;
+    }
+
+    /** Cache stats for admin health endpoint. */
+    public static int cacheSize() {
+        return CACHE.size();
     }
 
     /* ================= Universal chat (history-aware) ================= */

@@ -57,7 +57,9 @@ Set-Content $apiJs $js -NoNewline
 # sync static assets into deploy/ and push to Firebase Hosting
 $src = Join-Path $Root "src\main\resources\static"
 $dst = Join-Path $Root "deploy"
-Copy-Item (Join-Path $src "index.html") (Join-Path $dst "index.html") -Force
+Get-ChildItem (Join-Path $src "*.html") | ForEach-Object {
+    Copy-Item $_.FullName (Join-Path $dst $_.Name) -Force
+}
 Copy-Item (Join-Path $src "css"), (Join-Path $src "js") (Join-Path $dst "static") -Recurse -Force
 Push-Location $Root
 & $Fb deploy --only hosting | Out-File (Join-Path $LogDir "firebase-deploy.log")

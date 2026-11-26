@@ -3,6 +3,7 @@ package com.educore.ai;
 import com.educore.ai.OpenAIService.OpenAIException;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.sun.net.httpserver.HttpExchange;
 import com.sun.net.httpserver.HttpServer;
@@ -45,6 +46,9 @@ public final class WebServer {
         ChatEngine engine = new ChatEngine();
         JsonNode prompts = JsonStore.load("data/openai_prompts.json");
 
+        // PostgreSQL: apply schema migrations + migrate legacy JSON stores once
+        JsonToPostgres.runIfNeeded();
+
         HttpServer server = HttpServer.create(new InetSocketAddress("0.0.0.0", port), 0);
         // handle each request on its own thread so AI calls don't block the site
         server.setExecutor(Executors.newCachedThreadPool());
@@ -57,6 +61,8 @@ public final class WebServer {
             String path = exchange.getRequestURI().getPath();
             if (path.equals("/") || path.equals("/index.html")) {
                 serveStatic(exchange, "static/index.html", "text/html; charset=UTF-8");
+            } else if (path.equals("/admin") || path.equals("/admin.html")) {
+                serveStatic(exchange, "static/admin.html", "text/html; charset=UTF-8");
             } else if (path.startsWith("/static/")) {
                 // serve files from classpath static dir; block traversal
                 String rel = path.substring("/static/".length());
@@ -120,7 +126,7 @@ public final class WebServer {
                         clearAuthCookies(exchange);
                         send(exchange, 200, "{\"ok\":true}", "application/json");
                     }
-                    case "/api/auth/forgot" -> sendJson(exchange, 200, AuthService.forgot(req));
+                    case "/api/auth/forgot" -> sendJson(exchange, 200, AuthService.forgot(req, ip));
                     case "/api/auth/reset" -> { AuthService.reset(req); send(exchange, 200, "{\"ok\":true}", "application/json"); }
                     case "/api/auth/change-password" -> {
                         AuthService.AuthUser u = requireUser(exchange);
@@ -216,13 +222,55 @@ public final class WebServer {
         server.createContext("/api/chat", exchange -> {
             if (preflight(exchange)) return;
             cors(exchange);
-            if (!"POST".equals(exchange.getRequestMethod())) {
-                send(exchange, 405, "{\"error\":\"method not allowed\"}", "application/json");
-                return;
-            }
             AuthService.AuthUser authUser = requireUser(exchange);
             if (authUser == null) return;
             try {
+                String method = exchange.getRequestMethod();
+                String path = exchange.getRequestURI().getPath();
+                String query = exchange.getRequestURI().getQuery();
+
+                // conversation history management (persistent per user)
+                if ("GET".equals(method) && path.equals("/api/chat/sessions")) {
+                    send(exchange, 200, MAPPER.writeValueAsString(
+                            ConversationStore.sessionsForUser(authUser.id())), "application/json");
+                    return;
+                }
+                if ("GET".equals(method) && path.equals("/api/chat/history")) {
+                    String sid = queryParam(query, "session_id");
+                    if (sid == null || !sid.startsWith(authUser.id() + ":")) {
+                        send(exchange, 400, "{\"error\":\"invalid session\"}", "application/json");
+                        return;
+                    }
+                    ArrayNode turns = MAPPER.createArrayNode();
+                    for (ConversationStore.Turn t : ConversationStore.allHistory(sid)) {
+                        ObjectNode n = turns.addObject();
+                        n.put("role", t.role());
+                        n.put("text", t.text());
+                    }
+                    send(exchange, 200, MAPPER.writeValueAsString(turns), "application/json");
+                    return;
+                }
+                if (("DELETE".equals(method) || "POST".equals(method))
+                        && (path.equals("/api/chat/history") || path.equals("/api/chat/clear"))) {
+                    String sid = queryParam(query, "session_id");
+                    if (sid == null) {
+                        JsonNode req = readJson(exchange);
+                        sid = req.path("session_id").asText("");
+                    }
+                    if (sid == null || !sid.startsWith(authUser.id() + ":")) {
+                        send(exchange, 400, "{\"error\":\"invalid session\"}", "application/json");
+                        return;
+                    }
+                    ConversationStore.clear(sid);
+                    AuditService.log(authUser.id(), authUser.email(), "chat_cleared", sid);
+                    send(exchange, 200, "{\"ok\":true}", "application/json");
+                    return;
+                }
+
+                if (!"POST".equals(method) || !path.equals("/api/chat")) {
+                    send(exchange, 405, "{\"error\":\"method not allowed\"}", "application/json");
+                    return;
+                }
                 String body = new String(exchange.getRequestBody().readAllBytes(), StandardCharsets.UTF_8);
                 JsonNode req = MAPPER.readTree(body);
                 String message = req.path("message").asText("").trim();
@@ -254,7 +302,8 @@ public final class WebServer {
                     send(exchange, 400, "{\"error\":\"topic is required\"}", "application/json");
                     return;
                 }
-                HybridAssessment.Result result = HybridAssessment.generate(
+                HybridAssessment.Result result = HybridAssessment.generateForUser(
+                        authUser.id(),
                         req.path("subject").asText("General"),
                         topic,
                         req.path("level").asText("General"),
@@ -505,6 +554,136 @@ public final class WebServer {
             }
         });
 
+        // ---------- Long-answer essays ----------
+        server.createContext("/api/essays", exchange -> {
+            if (preflight(exchange)) return;
+            cors(exchange);
+            AuthService.AuthUser authUser = requireUser(exchange);
+            if (authUser == null) return;
+            try {
+                String path = exchange.getRequestURI().getPath();
+                String method = exchange.getRequestMethod();
+                String query = exchange.getRequestURI().getQuery();
+
+                if ("GET".equals(method) && path.equals("/api/essays")) {
+                    int limit = 50;
+                    String l = queryParam(query, "limit");
+                    if (l != null) try { limit = Integer.parseInt(l); } catch (Exception ignored) {}
+                    send(exchange, 200, MAPPER.writeValueAsString(
+                            EssayService.list(authUser, limit)), "application/json");
+                    return;
+                }
+                if ("POST".equals(method) && path.equals("/api/essays/evaluate")) {
+                    sendJson(exchange, 200, EssayService.evaluate(readJson(exchange), authUser));
+                    return;
+                }
+                if (path.startsWith("/api/essays/")) {
+                    String rest = path.substring("/api/essays/".length());
+                    int slash = rest.indexOf('/');
+                    String id = slash < 0 ? rest : rest.substring(0, slash);
+                    String action = slash < 0 ? "" : rest.substring(slash + 1);
+                    if ("GET".equals(method) && (action.isEmpty() || action.equals("get"))) {
+                        sendJson(exchange, 200, EssayService.get(id, authUser));
+                        return;
+                    }
+                    if ("POST".equals(method) && action.equals("finalize")) {
+                        sendJson(exchange, 200,
+                                EssayService.finalize(id, readJson(exchange), authUser));
+                        return;
+                    }
+                }
+                send(exchange, 405, "{\"error\":\"method not allowed\"}", "application/json");
+            } catch (IllegalArgumentException e) {
+                send(exchange, 400, "{\"error\":\"" + escape(e.getMessage()) + "\"}", "application/json");
+            } catch (Exception e) {
+                send(exchange, 500, "{\"error\":\"essay error\"}", "application/json");
+            }
+        });
+
+        // ---------- Notifications (user-facing) ----------
+        server.createContext("/api/notifications", exchange -> {
+            if (preflight(exchange)) return;
+            cors(exchange);
+            AuthService.AuthUser authUser = requireUser(exchange);
+            if (authUser == null) return;
+            if (!"GET".equals(exchange.getRequestMethod())) {
+                send(exchange, 405, "{\"error\":\"method not allowed\"}", "application/json");
+                return;
+            }
+            send(exchange, 200, MAPPER.writeValueAsString(
+                    NotificationService.forUser(authUser, 50)), "application/json");
+        });
+
+        // ---------- Admin ----------
+        server.createContext("/api/admin", exchange -> {
+            if (preflight(exchange)) return;
+            cors(exchange);
+            AuthService.AuthUser authUser = requireUser(exchange);
+            if (authUser == null) return;
+            if (!"admin".equals(authUser.role())) {
+                AuditService.log(authUser.id(), authUser.email(), "admin_access_denied",
+                        exchange.getRequestURI().getPath());
+                send(exchange, 403, "{\"error\":\"admin access required\"}", "application/json");
+                return;
+            }
+            try {
+                String path = exchange.getRequestURI().getPath();
+                String method = exchange.getRequestMethod();
+                String query = exchange.getRequestURI().getQuery();
+
+                if ("GET".equals(method) && path.equals("/api/admin/overview")) {
+                    sendJson(exchange, 200, AdminService.overview(authUser));
+                    return;
+                }
+                if ("GET".equals(method) && path.equals("/api/admin/health")) {
+                    sendJson(exchange, 200, AdminService.health(authUser));
+                    return;
+                }
+                if ("GET".equals(method) && path.equals("/api/admin/users")) {
+                    sendJson(exchange, 200, AdminService.listUsers(authUser,
+                            queryParam(query, "q"), queryParam(query, "role"),
+                            queryParam(query, "status"),
+                            parseInt(queryParam(query, "page"), 1),
+                            parseInt(queryParam(query, "size"), 20)));
+                    return;
+                }
+                if (path.startsWith("/api/admin/users/")) {
+                    String rest = path.substring("/api/admin/users/".length());
+                    int slash = rest.indexOf('/');
+                    String id = slash < 0 ? rest : rest.substring(0, slash);
+                    String action = slash < 0 ? "" : rest.substring(slash + 1);
+                    if ("GET".equals(method) && (action.isEmpty() || action.equals("get"))) {
+                        sendJson(exchange, 200, AdminService.getUser(authUser, id));
+                        return;
+                    }
+                    if ("POST".equals(method) && (action.equals("update") || action.isEmpty())) {
+                        sendJson(exchange, 200, AdminService.updateUser(authUser, id, readJson(exchange)));
+                        return;
+                    }
+                }
+                if ("GET".equals(method) && path.equals("/api/admin/audit")) {
+                    send(exchange, 200, MAPPER.writeValueAsString(
+                            AdminService.audit(authUser, parseInt(queryParam(query, "limit"), 100))),
+                            "application/json");
+                    return;
+                }
+                if ("GET".equals(method) && path.equals("/api/admin/notifications")) {
+                    send(exchange, 200, MAPPER.writeValueAsString(
+                            AdminService.listNotifications(authUser)), "application/json");
+                    return;
+                }
+                if ("POST".equals(method) && path.equals("/api/admin/notifications")) {
+                    sendJson(exchange, 200, AdminService.createNotification(authUser, readJson(exchange)));
+                    return;
+                }
+                send(exchange, 404, "{\"error\":\"unknown admin endpoint\"}", "application/json");
+            } catch (IllegalArgumentException e) {
+                send(exchange, 400, "{\"error\":\"" + escape(e.getMessage()) + "\"}", "application/json");
+            } catch (Exception e) {
+                send(exchange, 500, "{\"error\":\"admin error\"}", "application/json");
+            }
+        });
+
         server.start();
         System.out.println("EDUCORE AI web server running at http://localhost:" + port);
         System.out.println("API: /api/chat /api/quiz /api/report /api/exams/* /api/documents/* /api/planner/* /api/classrooms/* /api/ai/*");
@@ -589,7 +768,7 @@ public final class WebServer {
                     Map<String, String> vars = baseVars(req);
                     vars.put("topic", topic);
                     vars.put("detail_level", req.path("detail_level").asText("medium"));
-                    String answer = AIProvider.generate(fill(t.path("instructions").asText(), vars),
+                    String answer = AIProvider.generateForUser(authUser.id(), fill(t.path("instructions").asText(), vars),
                             fill(t.path("input_template").asText(), vars));
                     sendAI(exchange, answer, "notes");
                 }
@@ -600,7 +779,7 @@ public final class WebServer {
                     Map<String, String> vars = Map.of(
                             "text", text,
                             "length", req.path("length").asText("standard"));
-                    String answer = AIProvider.generate(fill(t.path("instructions").asText(), vars),
+                    String answer = AIProvider.generateForUser(authUser.id(), fill(t.path("instructions").asText(), vars),
                             fill(t.path("input_template").asText(), vars));
                     sendAI(exchange, answer, "summary");
                 }
@@ -611,7 +790,7 @@ public final class WebServer {
                     Map<String, String> vars = baseVars(req);
                     vars.put("topic", topic);
                     vars.put("count", req.path("count").asText("5"));
-                    String answer = AIProvider.generate(fill(t.path("instructions").asText(), vars),
+                    String answer = AIProvider.generateForUser(authUser.id(), fill(t.path("instructions").asText(), vars),
                             fill(t.path("input_template").asText(), vars));
                     sendAI(exchange, answer, "quiz");
                 }
@@ -627,7 +806,7 @@ public final class WebServer {
                     fields.fieldNames().forEachRemaining(k -> vars.put(k, fields.path(k).asText("")));
                     String system = fill(ep.path("system").asText(), vars);
                     String user = fill(ep.path("user_template").asText(), vars);
-                    String answer = AIProvider.generate(system + "\n\n" + prompts.path("master_instructions").asText(), user);
+                    String answer = AIProvider.generateForUser(authUser.id(), system + "\n\n" + prompts.path("master_instructions").asText(), user);
                     sendAI(exchange, answer, engineName);
                 }
                 default -> send(exchange, 404, "{\"error\":\"unknown AI endpoint\"}", "application/json");
@@ -736,6 +915,11 @@ public final class WebServer {
             return auth.substring(7).trim();
         }
         return null;
+    }
+
+    private static int parseInt(String s, int def) {
+        if (s == null) return def;
+        try { return Integer.parseInt(s.trim()); } catch (Exception e) { return def; }
     }
 
     private static String queryParam(String query, String name) {

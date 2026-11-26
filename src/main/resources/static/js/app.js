@@ -34,6 +34,7 @@ const state = {
   view: "overview",
   user: null,
   chats: {},          // view -> messages[]
+  remoteChats: {},    // chatKey -> backend session_id (persistent history)
   activeChat: "main",
   quiz: null,         // {student, key, answers, submitted, score}
 };
@@ -61,6 +62,22 @@ function renderProfile() {
   if (roleEl) roleEl.textContent = u ? u.role : "signed out";
   const initial = ((u && u.name) || "S").trim().charAt(0).toUpperCase() || "S";
   document.querySelectorAll(".avatar").forEach(a => { a.textContent = initial; });
+  updateAdminNav();
+}
+
+/** Shows the Admin link only for admin-role users (real page, /admin). */
+function updateAdminNav() {
+  const nav = document.getElementById("nav");
+  if (!nav) return;
+  nav.querySelectorAll(".nav-item-admin").forEach(a => a.remove());
+  if (state.user && state.user.role === "admin") {
+    const a = document.createElement("a");
+    a.className = "nav-item nav-item-admin";
+    a.href = "/admin";
+    a.innerHTML = icon("settings") + "<span>Admin</span>";
+    const sep = nav.querySelector(".nav-divider");
+    nav.insertBefore(a, sep || null);
+  }
 }
 
 function renderNav() {
@@ -368,6 +385,11 @@ function vTutor(root) {
           <input type="file" id="chatFile" accept="image/*" style="display:none">
           <button class="icon-btn" id="chatAttach" title="Attach image"></button>
           <textarea id="chatInput" placeholder="Ask anything about your studies..."></textarea>
+          <select id="chatLang" class="chat-lang" title="Voice recognition language">
+            <option value="en-IN">EN</option>
+            <option value="hi-IN">हिं</option>
+          </select>
+          <button class="icon-btn" id="chatMic" title="Voice input (speech is transcribed, not stored)"></button>
           <button class="btn btn-primary" id="chatSend">${icon("send")}</button>
           <button class="btn btn-ghost" id="chatStop" style="display:none">Stop</button>
         </div>
@@ -377,6 +399,7 @@ function vTutor(root) {
 
   renderChatList();
   renderChatMsgs();
+  loadRemoteChats();
 
   document.getElementById("newChat").addEventListener("click", () => {
     state.activeChat = "c" + Date.now();
@@ -452,6 +475,80 @@ function vTutor(root) {
     if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); send(); }
   });
 
+  // ---------- voice input (Web Speech API - no audio is stored) ----------
+  const micBtn = document.getElementById("chatMic");
+  const langSel = document.getElementById("chatLang");
+  const chatInput = document.getElementById("chatInput");
+  micBtn.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" x2="12" y1="19" y2="22"/></svg>';
+
+  const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+  let recog = null, listening = false;
+
+  const setMicState = (state, label) => {
+    micBtn.classList.toggle("recording", state === "recording");
+    micBtn.classList.toggle("denied", state === "denied");
+    micBtn.title = label || "Voice input (speech is transcribed, not stored)";
+  };
+
+  if (SR) {
+    recog = new SR();
+    recog.interimResults = true;
+    recog.continuous = false;
+    recog.lang = langSel.value;
+
+    recog.onresult = (e) => {
+      let finalText = "", interim = "";
+      for (let i = e.resultIndex; i < e.results.length; i++) {
+        const t = e.results[i][0].transcript;
+        if (e.results[i].isFinal) finalText += t; else interim += t;
+      }
+      // show live transcription in the input so the user can edit before sending
+      const base = chatInput.dataset.preVoice || "";
+      chatInput.value = (base + " " + (finalText || interim)).trim();
+      chatInput.dataset.preVoice = base;
+    };
+    recog.onend = () => {
+      listening = false;
+      setMicState("idle");
+      if (chatInput.value.trim()) chatInput.focus();
+    };
+    recog.onerror = (e) => {
+      listening = false;
+      setMicState("idle");
+      if (e.error === "not-allowed" || e.error === "service-not-allowed") {
+        setMicState("denied", "Microphone blocked - check browser site permissions");
+        toast("Microphone access denied. Allow mic permission for this site, or keep typing - text input works fine.");
+      } else if (e.error === "no-speech") {
+        toast("No speech detected. Try again or type your question.");
+      } else if (e.error !== "aborted") {
+        toast("Voice input error: " + e.error + ". You can still type your message.");
+      }
+    };
+  } else {
+    micBtn.style.opacity = "0.4";
+    micBtn.title = "Voice input not supported in this browser - type instead";
+  }
+
+  micBtn.addEventListener("click", () => {
+    if (!recog) {
+      toast("Voice input isn't supported in this browser. Please type your message.");
+      return;
+    }
+    if (listening) { recog.stop(); return; }
+    try {
+      recog.lang = langSel.value;
+      chatInput.dataset.preVoice = chatInput.value;
+      listening = true;
+      setMicState("recording", "Listening... click mic to stop");
+      recog.start();
+    } catch (e) {
+      listening = false;
+      setMicState("idle");
+      toast("Could not start microphone: " + e.message);
+    }
+  });
+  langSel.addEventListener("change", () => { if (recog) recog.lang = langSel.value; });
+
   // image attach -> vision endpoint
   document.getElementById("chatAttach").innerHTML = icon("upload");
   const fileInput = document.getElementById("chatFile");
@@ -502,17 +599,55 @@ function vTutor(root) {
   }
 }
 
+// backend session id for a chat key: "<userId>:chat-<key>"
+function backendSession(chatKey) {
+  return (state.user ? state.user.id : "anon") + ":" + "chat-" + chatKey;
+}
+
+async function loadRemoteChats() {
+  try {
+    const sessions = await API.chatSessions();
+    const uidPrefix = (state.user ? state.user.id : "") + ":";
+    sessions.forEach(s => {
+      const sid = s.session_id || "";
+      if (!sid.startsWith(uidPrefix)) return;
+      const chatKey = sid.slice(uidPrefix.length).replace(/^chat-/, "");
+      if (chatKey) state.remoteChats[chatKey] = sid;
+    });
+    renderChatList();
+  } catch (e) { /* history unavailable - local chats still work */ }
+}
+
+async function restoreChat(chatKey) {
+  const sid = state.remoteChats[chatKey];
+  if (!sid || (state.chats[chatKey] && state.chats[chatKey].length)) return;
+  try {
+    const turns = await API.chatHistory(sid);
+    if (!turns.length) return;
+    state.chats[chatKey] = turns.map(t => ({
+      role: t.role === "model" ? "bot" : "user",
+      text: t.text,
+      module: "history"
+    }));
+    if (chatKey === state.activeChat) renderChatMsgs();
+  } catch (e) { /* ignore */ }
+}
+
 function renderChatList() {
   const list = document.getElementById("chatList");
   if (!list) return;
-  const keys = Object.keys(state.chats);
+  const keys = [...new Set([...Object.keys(state.chats), ...Object.keys(state.remoteChats)])];
   list.innerHTML = keys.map(k => {
-    const first = (state.chats[k][0]?.text || "New chat").slice(0, 34);
+    const msgs = state.chats[k] || [];
+    const first = msgs.length
+      ? (msgs.find(m => m.role === "user")?.text || msgs[0].text || "Chat").slice(0, 34)
+      : "Previous chat";
     return `<div class="chat-item ${k === state.activeChat ? "active" : ""}" data-chat="${k}">${esc(first)}</div>`;
   }).join("");
   list.querySelectorAll(".chat-item").forEach(el =>
     el.addEventListener("click", () => {
       state.activeChat = el.dataset.chat;
+      restoreChat(state.activeChat);
       renderChatList(); renderChatMsgs();
     }));
 }
@@ -1078,13 +1213,27 @@ function vComingSoon(root) {
 function vNotifications(root) {
   root.innerHTML = `
   <div class="view">
-    <div class="view-header"><h2>Notifications</h2><p>Stay updated on your learning activity.</p></div>
-    <div class="card empty-state">
-      ${icon("bell")}
-      <h3>All caught up</h3>
-      <p>No notifications yet. Study reminders and progress alerts will appear here once the notification backend is enabled.</p>
-    </div>
+    <div class="view-header"><h2>Notifications</h2><p>Platform announcements and alerts for your account.</p></div>
+    <div class="card" id="notifList"><div class="muted">Loading...</div></div>
   </div>`;
+  API.notifications().then(list => {
+    const el = document.getElementById("notifList");
+    if (!el) return;
+    if (!list.length) {
+      el.innerHTML = `<div class="empty-state">${icon("bell")}<h3>All caught up</h3><p>No notifications yet.</p></div>`;
+      return;
+    }
+    el.innerHTML = list.map(n => `
+      <div style="padding:12px 0;border-bottom:1px solid var(--border)">
+        <strong>${esc(n.title)}</strong>
+        ${n.audience === "platform" ? ' <span class="chip">platform</span>' : ""}
+        <div class="muted" style="margin-top:4px">${esc(n.body || "")}</div>
+        <div class="muted" style="font-size:12px;margin-top:4px">${esc((n.created_at || "").slice(0, 16).replace("T", " "))}</div>
+      </div>`).join("");
+  }).catch(() => {
+    const el = document.getElementById("notifList");
+    if (el) el.innerHTML = '<div class="muted">Notifications unavailable.</div>';
+  });
 }
 
 /* ---------- Learning Progress ---------- */
@@ -1187,13 +1336,20 @@ function showNotifPanel(e) {
   dd.innerHTML = `
     <div class="dropdown-item" style="cursor:default;color:var(--text);font-weight:600">Notifications</div>
     <div class="dropdown-sep"></div>
-    <div class="dropdown-item" style="cursor:default">No new notifications</div>
+    <div class="dropdown-item" style="cursor:default">Loading...</div>
     <div class="dropdown-sep"></div>
     <a class="dropdown-item" href="#/notifications">View all</a>`;
   document.body.appendChild(dd);
   const btn = document.getElementById("notifBtn").getBoundingClientRect();
   dd.style.top = (btn.bottom + 8) + "px";
   dd.style.right = (window.innerWidth - btn.right) + "px";
+  API.notifications().then(list => {
+    const items = dd.querySelectorAll(".dropdown-item");
+    if (items.length > 2) items[2].outerHTML = list.length
+      ? list.slice(0, 3).map(n =>
+          `<div class="dropdown-item" style="cursor:default"><strong>${esc(n.title)}</strong><br><span class="muted" style="font-size:12px">${esc(n.body || "")}</span></div>`).join("")
+      : '<div class="dropdown-item" style="cursor:default">No new notifications</div>';
+  }).catch(() => {});
 }
 
 /* ============================================================
@@ -1309,11 +1465,11 @@ function vRegister(root) {
 function vForgot(root) {
   root.innerHTML = authShell(`
     <h2 style="text-align:center;margin-bottom:18px">Reset password</h2>
-    <p class="muted" style="margin-bottom:14px">Enter your account email. A reset token will be generated.</p>
+    <p class="muted" style="margin-bottom:14px">Enter your account email and we'll send you a secure reset link. The link expires in 30 minutes.</p>
     <div class="field"><label>Email</label><input type="email" id="fgEmail" placeholder="you@example.com"></div>
     <div class="auth-error" id="fgErr"></div>
     <div class="auth-ok" id="fgOk"></div>
-    <button class="btn btn-primary" id="fgGo" style="width:100%;justify-content:center">Send reset token</button>
+    <button class="btn btn-primary" id="fgGo" style="width:100%;justify-content:center">Send reset link</button>
     <div class="auth-links"><a href="#/login">Back to sign in</a></div>`);
 
   document.getElementById("fgGo").addEventListener("click", async () => {
@@ -1324,18 +1480,21 @@ function vForgot(root) {
     if (!email) { err.textContent = "Enter your email."; return; }
     try {
       const r = await API.authForgot({ email });
-      ok.innerHTML = esc(r.message) + (r.dev_reset_token
-        ? `<br><br><strong>Dev mode (no email service):</strong><br>Token: <code>${esc(r.dev_reset_token)}</code><br><a href="#/reset">Use this token</a>`
-        : "");
+      ok.textContent = r.message || "If an account exists for this email, a reset link has been sent.";
     } catch (e) { err.textContent = e.message; }
   });
 }
 
 function vReset(root) {
+  // support emailed links: #/reset?token=...&email=...
+  const hashQ = location.hash.includes("?") ? location.hash.split("?")[1] : "";
+  const qp = new URLSearchParams(hashQ);
+  const prefillToken = qp.get("token") || "";
+  const prefillEmail = qp.get("email") || "";
   root.innerHTML = authShell(`
     <h2 style="text-align:center;margin-bottom:18px">Set new password</h2>
-    <div class="field"><label>Email</label><input type="email" id="rsEmail" placeholder="you@example.com"></div>
-    <div class="field"><label>Reset token</label><input type="text" id="rsToken" placeholder="Paste reset token"></div>
+    <div class="field"><label>Email</label><input type="email" id="rsEmail" placeholder="you@example.com" value="${esc(prefillEmail)}"></div>
+    <div class="field"><label>Reset token</label><input type="text" id="rsToken" placeholder="Paste reset token" value="${esc(prefillToken)}"></div>
     <div class="field"><label>New password</label>
       <div class="pw-wrap"><input type="password" id="rsPass" placeholder="Min 8 characters">${pwToggle("rsPass")}</div>
     </div>

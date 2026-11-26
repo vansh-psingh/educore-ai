@@ -36,7 +36,8 @@ public final class ExamService {
         int count = Math.max(1, Math.min(30, req.path("count").asInt(5)));
         int duration = Math.max(1, Math.min(180, req.path("duration_min").asInt(15)));
 
-        HybridAssessment.Result result = HybridAssessment.generate(
+        HybridAssessment.Result result = HybridAssessment.generateForUser(
+                user.id(),
                 req.path("subject").asText("General"),
                 topic,
                 req.path("level").asText("General"),
@@ -129,8 +130,37 @@ public final class ExamService {
             total += marks;
             String correct = k.path("correct_answer").asText("");
             String given = answers.path(String.valueOf(num)).asText("").trim();
-            boolean ok = score(given, correct, findType(exam, num));
-            if (ok) got += marks;
+            String qType = findType(exam, num);
+
+            int earned = 0;
+            boolean ok = false;
+            JsonNode essayEval = null;
+            String essayId = null;
+            if ("long_answer".equals(qType)) {
+                // dedicated rubric evaluation - stored as an essay submission,
+                // always flagged as an AI suggestion pending teacher review
+                try {
+                    ObjectNode ereq = MAPPER.createObjectNode();
+                    ereq.put("question", findQuestionText(exam, num));
+                    ereq.put("answer", given);
+                    ereq.put("subject", exam.path("subject").asText("General"));
+                    ereq.put("level", exam.path("level").asText("General"));
+                    ereq.put("max_marks", marks);
+                    ereq.put("exam_id", id);
+                    ObjectNode sub = EssayService.evaluate(ereq, user);
+                    essayId = sub.path("id").asText();
+                    essayEval = sub.path("evaluation");
+                    earned = (int) Math.round(essayEval.path("total_score").asDouble());
+                    earned = Math.max(0, Math.min(marks, earned));
+                    ok = earned >= marks;
+                } catch (Exception e) {
+                    earned = 0; // AI unavailable - recorded as pending, no marks invented
+                }
+            } else {
+                ok = score(given, correct, qType);
+                earned = ok ? marks : 0;
+            }
+            got += earned;
 
             ObjectNode r = review.addObject();
             r.put("number", num);
@@ -138,8 +168,14 @@ public final class ExamService {
             r.put("correct_answer", correct);
             r.put("explanation", k.path("explanation").asText(""));
             r.put("marks", marks);
-            r.put("earned", ok ? marks : 0);
+            r.put("earned", earned);
             r.put("correct", ok);
+            if ("long_answer".equals(qType)) {
+                r.put("ai_suggestion", true);
+                if (essayId != null) r.put("essay_id", essayId);
+                if (essayEval != null) r.set("evaluation", essayEval);
+                r.put("note", EssayService.DISCLAIMER);
+            }
         }
 
         int pct = total == 0 ? 0 : (int) Math.round(100.0 * got / total);
@@ -153,6 +189,7 @@ public final class ExamService {
             attempts = hist.putArray("attempts");
         }
         ObjectNode att = attempts.addObject();
+        att.put("id", java.util.UUID.randomUUID().toString().substring(0, 8));
         att.put("exam_id", id);
         att.put("title", exam.path("title").asText());
         att.put("subject", exam.path("subject").asText());
@@ -189,6 +226,15 @@ public final class ExamService {
         for (JsonNode q : exam.path("questions")) {
             if (q.path("number").asInt() == num) {
                 return q.path("type").asText();
+            }
+        }
+        return "";
+    }
+
+    private static String findQuestionText(JsonNode exam, int num) {
+        for (JsonNode q : exam.path("questions")) {
+            if (q.path("number").asInt() == num) {
+                return q.path("question").asText("");
             }
         }
         return "";

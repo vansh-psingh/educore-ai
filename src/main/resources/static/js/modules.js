@@ -28,10 +28,60 @@ function vExams(root) {
         <div id="examHistory"><div class="muted">Loading...</div></div>
       </div>
     </div>
+    <div class="card" style="margin-top:18px">
+      <div class="section-title" style="margin-top:0">${icon("quiz")} Long-answer evaluation</div>
+      <p class="muted" style="margin-top:0">Get rubric-based feedback on descriptive answers. AI scores are suggestions - teachers finalize official marks.</p>
+      <div class="form-grid">
+        <div class="field"><label>Question</label><textarea id="essayQ" rows="2" placeholder="Paste or type the question..."></textarea></div>
+        <div class="field"><label>Your answer</label><textarea id="essayA" rows="5" placeholder="Write your detailed answer..."></textarea></div>
+        <div class="field"><label>Subject</label><input type="text" id="essaySubject" placeholder="General"></div>
+        <div class="field"><label>Level</label><select id="essayLevel"><option>General</option><option>Middle school</option><option>High school</option><option>Undergraduate</option></select></div>
+        <div class="field"><label>Max marks</label><input type="number" id="essayMarks" value="10" min="1" max="100"></div>
+      </div>
+      <button class="btn btn-primary" id="essayGo">${icon("quiz")} Evaluate answer</button>
+      <div id="essayResult" style="margin-top:14px"></div>
+      <div class="section-title" style="margin-top:18px">${icon("notes")} Evaluation history</div>
+      <div id="essayHistory"><div class="muted">Loading...</div></div>
+    </div>
     <div id="examArea" style="margin-top:18px"></div>
   </div>`;
 
   loadExamHistory();
+  loadEssayHistory();
+
+  document.getElementById("essayGo").addEventListener("click", async () => {
+    const q = document.getElementById("essayQ").value.trim();
+    const a = document.getElementById("essayA").value.trim();
+    if (!q || !a) { toast("Enter both the question and your answer."); return; }
+    const btn = document.getElementById("essayGo");
+    btn.disabled = true;
+    const out = document.getElementById("essayResult");
+    out.innerHTML = '<div class="muted">Evaluating with AI...</div>';
+    try {
+      const r = await API.essayEvaluate({
+        question: q, answer: a,
+        subject: document.getElementById("essaySubject").value || "General",
+        level: document.getElementById("essayLevel").value,
+        max_marks: +document.getElementById("essayMarks").value || 10
+      });
+      const ev = r.evaluation || {};
+      out.innerHTML = `
+        <div class="quiz-result-banner ${ev.total_score >= (r.max_marks * 0.7) ? "good" : ev.total_score >= (r.max_marks * 0.4) ? "mid" : "bad"}">
+          <div class="score">${ev.total_score ?? 0}/${r.max_marks}</div>
+          <div><strong>AI-suggested marks</strong><br><span class="muted">${esc(r.disclaimer || "Requires teacher review.")}</span></div>
+        </div>
+        ${(ev.criteria || []).map(cr => `
+          <div class="quiz-q"><div class="q-num">${esc(cr.name)} · ${cr.score}/${cr.max}</div>
+          <div class="muted"><em>${esc(cr.comment || "")}</em></div></div>`).join("")}
+        ${ev.feedback ? `<div class="muted" style="margin:8px 0"><strong>Feedback:</strong> ${esc(ev.feedback)}</div>` : ""}
+        ${(ev.missing_concepts || []).length ? `<div class="muted" style="margin:4px 0"><strong>Missing concepts:</strong> ${ev.missing_concepts.map(esc).join(", ")}</div>` : ""}
+        ${(ev.improvements || []).length ? `<div class="muted" style="margin:4px 0"><strong>To improve:</strong> ${ev.improvements.map(esc).join("; ")}</div>` : ""}`;
+      mathify(out);
+      loadEssayHistory();
+    } catch (e) {
+      out.innerHTML = `<div class="auth-error">${esc(e.message)}</div>`;
+    } finally { btn.disabled = false; }
+  });
 
   document.getElementById("eGo").addEventListener("click", async () => {
     const topic = document.getElementById("eTopic").value.trim();
@@ -54,6 +104,20 @@ function vExams(root) {
       toast("Exam generation failed: " + e.message);
     } finally { btn.disabled = false; }
   });
+}
+
+function loadEssayHistory() {
+  const el = document.getElementById("essayHistory");
+  if (!el) return;
+  API.essays(10).then(list => {
+    if (!list.length) { el.innerHTML = '<div class="muted">No evaluations yet.</div>'; return; }
+    el.innerHTML = list.map(e => `
+      <div class="exam-hist-row">
+        <div><strong>${esc((e.question || "").slice(0, 60))}${(e.question || "").length > 60 ? "…" : ""}</strong><br>
+        <span class="muted">${esc(e.subject)} · ${esc((e.created || "").slice(0, 10))} · ${e.status === "teacher_reviewed" ? "teacher reviewed" : "AI suggestion"}</span></div>
+        <div class="exam-score ${e.final_marks >= 0 ? (e.final_marks >= e.max_marks * 0.7 ? "good" : "mid") : "mid"}">${e.final_marks >= 0 ? e.final_marks : "—"}/${e.max_marks}</div>
+      </div>`).join("");
+  }).catch(() => { el.innerHTML = '<div class="muted">History unavailable.</div>'; });
 }
 
 function loadExamHistory() {
@@ -124,7 +188,8 @@ function renderExamQuestion() {
       <button class="quiz-opt ${ex.answers[q.number] === o ? "selected" : ""}" data-v="${esc(o)}">${String.fromCharCode(65 + i)}. ${esc(o)}</button>`).join("") : ""}
     ${q.type === "true_false" ? q.options.map(o => `
       <button class="quiz-opt ${ex.answers[q.number] === o ? "selected" : ""}" data-v="${esc(o)}">${esc(o)}</button>`).join("") : ""}
-    ${q.type === "short_answer" ? `<input type="text" class="exam-short" value="${esc(ex.answers[q.number] || "")}" placeholder="Type your answer...">` : ""}`;
+    ${q.type === "short_answer" ? `<input type="text" class="exam-short" value="${esc(ex.answers[q.number] || "")}" placeholder="Type your answer...">` : ""}
+    ${q.type === "long_answer" ? `<textarea class="exam-long" rows="8" placeholder="Write a detailed answer (rubric-evaluated)...">${esc(ex.answers[q.number] || "")}</textarea>` : ""}`;
 
   box.querySelectorAll(".quiz-opt").forEach(b =>
     b.addEventListener("click", () => {
@@ -135,6 +200,8 @@ function renderExamQuestion() {
     }));
   const inp = box.querySelector(".exam-short");
   if (inp) inp.addEventListener("input", () => { ex.answers[q.number] = inp.value; syncNav(); });
+  const ta = box.querySelector(".exam-long");
+  if (ta) ta.addEventListener("input", () => { ex.answers[q.number] = ta.value; syncNav(); });
   mathify(box);
 }
 
@@ -199,9 +266,16 @@ function renderExamResult(r, auto) {
     <div class="section-title">Answer review</div>
     ${r.review.map(rv => `
       <div class="quiz-q">
-        <div class="q-num">QUESTION ${rv.number} · ${rv.marks} MARK${rv.marks > 1 ? "S" : ""} ${rv.correct ? '<span style="color:#4ade80">✓ correct</span>' : '<span style="color:#f87171">✗ incorrect</span>'}</div>
-        <div class="muted" style="margin:6px 0">Your answer: <strong>${esc(rv.your_answer || "-")}</strong> → Correct: <strong style="color:#4ade80">${esc(rv.correct_answer)}</strong></div>
-        <div class="muted"><em>${esc(rv.explanation || "")}</em></div>
+        <div class="q-num">QUESTION ${rv.number} · ${rv.marks} MARK${rv.marks > 1 ? "S" : ""} ${rv.correct ? '<span style="color:#4ade80">✓ correct</span>' : '<span style="color:#f87171">✗ incorrect</span>'}${rv.ai_suggestion ? ' <span class="badge" style="background:#7c3aed22;color:#a78bfa">AI SUGGESTION</span>' : ""}</div>
+        <div class="muted" style="margin:6px 0">Your answer: <strong>${esc((rv.your_answer || "-").slice(0, 300))}${(rv.your_answer || "").length > 300 ? "…" : ""}</strong>${rv.ai_suggestion ? "" : ` → Correct: <strong style="color:#4ade80">${esc(rv.correct_answer)}</strong>`}</div>
+        ${rv.ai_suggestion && rv.evaluation ? `
+          <div class="muted" style="margin:6px 0">AI score: <strong style="color:#67e8f9">${rv.evaluation.total_score}/${rv.marks}</strong> (suggested)</div>
+          ${(rv.evaluation.criteria || []).map(cr => `
+            <div class="muted" style="margin:2px 0 2px 12px">· ${esc(cr.name)}: ${cr.score}/${cr.max} - <em>${esc(cr.comment || "")}</em></div>`).join("")}
+          ${rv.evaluation.feedback ? `<div class="muted" style="margin:6px 0"><em>${esc(rv.evaluation.feedback)}</em></div>` : ""}
+          ${(rv.evaluation.missing_concepts || []).length ? `<div class="muted" style="margin:4px 0"><strong>Missing concepts:</strong> ${rv.evaluation.missing_concepts.map(esc).join(", ")}</div>` : ""}
+          <div class="muted" style="margin:4px 0;font-size:12px">${esc(rv.note || "AI-generated evaluation - requires teacher review for official marks.")}</div>` : ""}
+        ${!rv.ai_suggestion ? `<div class="muted"><em>${esc(rv.explanation || "")}</em></div>` : ""}
       </div>`).join("")}
     <div style="margin-top:14px;display:flex;gap:10px">
       <button class="btn btn-ghost" id="examAgain">Generate another exam</button>

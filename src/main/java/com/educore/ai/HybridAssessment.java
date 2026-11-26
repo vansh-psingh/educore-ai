@@ -45,6 +45,11 @@ public final class HybridAssessment {
 
     public static Result generate(String subject, String topic, String level,
                                   String difficulty, int count, String source) {
+        return generateForUser("", subject, topic, level, difficulty, count, source);
+    }
+
+    public static Result generateForUser(String userId, String subject, String topic, String level,
+                                         String difficulty, int count, String source) {
         String src = source == null ? "" : source.trim();
         int n = Math.max(1, Math.min(30, count));
 
@@ -54,7 +59,7 @@ public final class HybridAssessment {
             return new Result(quiz, MODE_NOTES);
         }
 
-        List<Question> aiQuestions = aiGenerate(subject, topic, level, difficulty, n);
+        List<Question> aiQuestions = aiGenerate(userId, subject, topic, level, difficulty, n);
         if (!aiQuestions.isEmpty()) {
             Quiz quiz = new Quiz(topic + " - Practice Quiz", subject,
                     difficulty == null || difficulty.isBlank() ? "standard" : difficulty, aiQuestions);
@@ -79,7 +84,7 @@ public final class HybridAssessment {
     }
 
     /** Asks the AI provider for strict-JSON questions; returns empty list on any failure. */
-    private static List<Question> aiGenerate(String subject, String topic, String level,
+    private static List<Question> aiGenerate(String userId, String subject, String topic, String level,
                                              String difficulty, int count) {
         try {
             String instructions =
@@ -91,6 +96,8 @@ public final class HybridAssessment {
                     + "- mcq: exactly 4 options; correct_answer must exactly match one option.\n"
                     + "- true_false: options must be [\"True\",\"False\"]; correct_answer is True or False.\n"
                     + "- short_answer: options is []; correct_answer is a concise expected answer (keywords).\n"
+                    + "- long_answer: options is []; correct_answer is a short model answer outline; "
+                    + "marks should be 5-10. Use for 1-2 questions max when count >= 5.\n"
                     + "- Vary question types; do not repeat questions.\n"
                     + "- Every question needs a correct_answer and a short explanation.\n"
                     + "- Match the academic level and difficulty exactly. Never invent facts.\n"
@@ -101,7 +108,7 @@ public final class HybridAssessment {
                     + "Number of questions: " + count + "\n"
                     + "Use LaTeX notation ($$...$$ for display math, \\(...\\) inline) for any formulas.";
 
-            String raw = AIProvider.generate(instructions, input);
+            String raw = AIProvider.generateForUser(userId, instructions, input);
             List<Question> parsed = parseQuestions(raw, count);
             if (parsed.isEmpty()) {
                 System.err.println("[HybridAssessment] AI returned unparseable output:\n" + raw);
@@ -190,7 +197,8 @@ public final class HybridAssessment {
     private static QuestionType mapType(String t) {
         return switch (t.trim().toLowerCase()) {
             case "true_false", "true/false", "tf" -> QuestionType.TRUE_FALSE;
-            case "short_answer", "short", "long_answer", "essay", "descriptive" -> QuestionType.SHORT_ANSWER;
+            case "short_answer", "short" -> QuestionType.SHORT_ANSWER;
+            case "long_answer", "essay", "descriptive", "long" -> QuestionType.LONG_ANSWER;
             default -> QuestionType.MCQ;
         };
     }

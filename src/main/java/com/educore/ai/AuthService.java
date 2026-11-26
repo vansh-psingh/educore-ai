@@ -1,5 +1,6 @@
 package com.educore.ai;
 
+import com.educore.ai.db.Db;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
@@ -200,6 +201,7 @@ public final class AuthService {
         saveUser(email, u);
 
         AuthUser au = new AuthUser(id, name, email, "student");
+        AuditService.log(id, email, "user_registered", id);
         return tokenResponse(au);
     }
 
@@ -215,7 +217,20 @@ public final class AuthService {
         }
         AuthUser au = new AuthUser(u.path("id").asText(), u.path("name").asText(),
                 u.path("email").asText(), u.path("role").asText("student"));
+        markLogin(au.id());
+        AuditService.log(au.id(), au.email(), "user_login", au.id());
         return tokenResponse(au);
+    }
+
+    private static void markLogin(String userId) {
+        if (!Db.configured() || userId == null) return;
+        try (var c = Db.conn();
+             var ps = c.prepareStatement(
+                     "UPDATE app_users SET last_login_at = now() WHERE id = ?")) {
+            ps.setString(1, userId);
+            ps.executeUpdate();
+        } catch (Exception ignored) {
+        }
     }
 
     public static ObjectNode refresh(String refreshToken) throws Exception {
@@ -236,29 +251,94 @@ public final class AuthService {
         // stateless tokens - client discards them; nothing server-side to clear
     }
 
-    public static ObjectNode forgot(JsonNode req) {
+    /**
+     * Initiates a password reset. Always returns the same generic message so
+     * account existence is never revealed. The raw token is NEVER returned in
+     * the API response - it is only delivered by email (or server log in dev).
+     */
+    public static ObjectNode forgot(JsonNode req, String clientIp) {
         String email = req.path("email").asText("").trim().toLowerCase();
         JsonNode u = findByEmail(email);
         ObjectNode out = MAPPER.createObjectNode();
+        out.put("message", "If an account exists for this email, a reset link has been sent.");
         if (u == null) {
-            // don't reveal whether the email exists
-            out.put("message", "If an account exists for this email, a reset link has been generated.");
+            AuditService.log(null, email, "password_reset_requested_unknown", "");
             return out;
         }
-        String token = UUID.randomUUID().toString().replace("-", "")
-                + UUID.randomUUID().toString().replace("-", "");
-        ObjectNode un = (ObjectNode) u;
+
+        byte[] raw = new byte[32];
+        RANDOM.nextBytes(raw);
+        String token = Base64.getUrlEncoder().withoutPadding().encodeToString(raw);
+        String tokenHash;
         try {
-            un.put("reset_token", hashToken(token));
+            tokenHash = hashToken(token);
         } catch (Exception e) {
             throw new IllegalStateException("token hashing failed", e);
         }
-        un.put("reset_exp", Instant.now().plusSeconds(RESET_TTL_SEC).toString());
-        saveUser(email, un);
-        out.put("message", "If an account exists for this email, a reset link has been generated.");
-        // NOTE: no SMTP configured - return token for local/dev use only
-        out.put("dev_reset_token", token);
+        String userId = u.path("id").asText();
+        Instant expires = Instant.now().plusSeconds(RESET_TTL_SEC);
+
+        if (Db.configured()) {
+            // single-use tokens in password_reset_tokens; invalidate older ones
+            try (var c = Db.conn()) {
+                c.setAutoCommit(false);
+                try (var ps = c.prepareStatement(
+                        "UPDATE password_reset_tokens SET used_at = now() "
+                                + "WHERE user_id = ? AND used_at IS NULL")) {
+                    ps.setString(1, userId);
+                    ps.executeUpdate();
+                }
+                try (var ps = c.prepareStatement(
+                        "INSERT INTO password_reset_tokens(user_id, token_hash, expires_at, created_ip) "
+                                + "VALUES (?,?,?,?)")) {
+                    ps.setString(1, userId);
+                    ps.setString(2, tokenHash);
+                    ps.setObject(3, java.sql.Timestamp.from(expires));
+                    ps.setString(4, clientIp);
+                    ps.executeUpdate();
+                }
+                c.commit();
+            } catch (Exception e) {
+                System.err.println("[auth] reset token store failed: " + e.getMessage());
+                return out;
+            }
+        } else {
+            // JSON mode: keep single active hashed token on the user record
+            ObjectNode un = (ObjectNode) u;
+            un.put("reset_token", tokenHash);
+            un.put("reset_exp", expires.toString());
+            saveUser(email, un);
+        }
+
+        deliverResetEmail(u, email, token);
+        AuditService.log(userId, email, "password_reset_requested", userId);
         return out;
+    }
+
+    /** Sends the reset email; falls back to a server-side log line in dev. */
+    private static void deliverResetEmail(JsonNode u, String email, String token) {
+        String base = firstNonBlank(System.getenv("APP_BASE_URL"), envValue("APP_BASE_URL"),
+                "http://localhost:8080");
+        String url = base.replaceAll("/$", "")
+                + "/#/reset?token=" + token + "&email=" + email;
+        try {
+            if (SmtpMailer.configured()) {
+                SmtpMailer.sendHtml(email, "Reset your EDUCORE AI password",
+                        SmtpMailer.resetEmailHtml(u.path("name").asText(""), url));
+                AuditService.log(u.path("id").asText(), email,
+                        "password_reset_email_sent", u.path("id").asText());
+            } else {
+                // dev mode: no SMTP - log the link server-side only (never in API)
+                System.out.println("[auth] SMTP not configured - password reset link for "
+                        + email + ": " + url);
+                AuditService.log(u.path("id").asText(), email,
+                        "password_reset_email_dev_logged", u.path("id").asText());
+            }
+        } catch (Exception e) {
+            System.err.println("[auth] reset email failed for " + email + ": " + e.getMessage());
+            AuditService.log(u.path("id").asText(), email,
+                    "password_reset_email_failed", u.path("id").asText());
+        }
     }
 
     public static void reset(JsonNode req) throws Exception {
@@ -268,20 +348,52 @@ public final class AuthService {
         if (password.length() < 8) throw new IllegalArgumentException("Password must be at least 8 characters.");
         JsonNode u = findByEmail(email);
         if (u == null) throw new IllegalArgumentException("Invalid reset request.");
-        ObjectNode un = (ObjectNode) u;
-        String stored = un.path("reset_token").asText("");
-        String exp = un.path("reset_exp").asText("");
-        if (stored.isEmpty() || !stored.equals(hashToken(token))
-                || Instant.parse(exp).isBefore(Instant.now())) {
-            throw new IllegalArgumentException("Reset token is invalid or expired.");
+        String tokenHash = hashToken(token);
+        String userId = u.path("id").asText();
+
+        boolean valid;
+        if (Db.configured()) {
+            valid = consumeDbResetToken(userId, tokenHash);
+        } else {
+            ObjectNode un = (ObjectNode) u;
+            String stored = un.path("reset_token").asText("");
+            String exp = un.path("reset_exp").asText("");
+            valid = !stored.isEmpty() && stored.equals(tokenHash)
+                    && Instant.parse(exp).isAfter(Instant.now());
+            if (valid) {
+                un.remove("reset_token");
+                un.remove("reset_exp");
+            }
         }
+        if (!valid) throw new IllegalArgumentException("Reset token is invalid, expired or already used.");
+
         byte[] salt = new byte[16];
         RANDOM.nextBytes(salt);
+        ObjectNode un = (ObjectNode) u;
         un.put("pass_hash", hashPassword(password, salt));
-        un.remove("reset_token");
-        un.remove("reset_exp");
         un.put("updated", Instant.now().toString());
         saveUser(email, un);
+        AuditService.log(userId, email, "password_reset_completed", userId);
+    }
+
+    /**
+     * Validates and consumes a DB reset token atomically: the row is marked
+     * used in the same statement that checks it, so a token can never be
+     * replayed even under concurrent requests.
+     */
+    private static boolean consumeDbResetToken(String userId, String tokenHash) {
+        try (var c = Db.conn();
+             var ps = c.prepareStatement(
+                     "UPDATE password_reset_tokens SET used_at = now() "
+                             + "WHERE user_id = ? AND token_hash = ? AND used_at IS NULL "
+                             + "AND expires_at > now()")) {
+            ps.setString(1, userId);
+            ps.setString(2, tokenHash);
+            return ps.executeUpdate() == 1;
+        } catch (Exception e) {
+            System.err.println("[auth] reset token verify failed: " + e.getMessage());
+            return false;
+        }
     }
 
     /** Change password for an authenticated user (claims from verified token). */
@@ -300,6 +412,7 @@ public final class AuthService {
         un.put("pass_hash", hashPassword(next, salt));
         un.put("updated", Instant.now().toString());
         saveUser(u.path("email").asText(), un);
+        AuditService.log(claims.get("sub"), claims.get("email"), "password_changed", claims.get("sub"));
     }
 
     public static ObjectNode me(Map<String, String> claims) {
