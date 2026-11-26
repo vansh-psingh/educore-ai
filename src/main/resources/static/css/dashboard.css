@@ -702,6 +702,9 @@ svg { flex-shrink: 0; }
 .vid-actions { display: flex; gap: 8px; margin-top: 8px; }
 
 /* video modal */
+.vid-results-head {
+  display: flex; align-items: center; gap: 12px; margin-top: 16px;
+}
 .video-modal {
   position: fixed; inset: 0; z-index: 200;
   background: rgba(4, 8, 18, .82); backdrop-filter: blur(4px);
@@ -713,15 +716,45 @@ svg { flex-shrink: 0; }
   border: 1px solid var(--border); border-radius: 16px; overflow: hidden;
   position: relative;
 }
+.vm-head {
+  display: flex; align-items: flex-start; justify-content: space-between;
+  gap: 12px; padding: 12px 16px;
+  background: rgba(11,17,32,.7); border-bottom: 1px solid var(--border);
+}
+.vm-title {
+  font-size: 14px; font-weight: 600; color: var(--text);
+  display: -webkit-box; -webkit-line-clamp: 1; -webkit-box-orient: vertical; overflow: hidden;
+}
+.vm-sub { display: flex; align-items: center; gap: 10px; margin-top: 4px; font-size: 12px; flex-wrap: wrap; }
+.vm-chip {
+  background: var(--grad-soft); color: var(--purple);
+  border: 1px solid rgba(139,92,246,.35); border-radius: 999px;
+  padding: 2px 10px; font-size: 11px; font-weight: 600;
+}
+.vm-yt { color: var(--cyan); text-decoration: none; display: inline-flex; align-items: center; gap: 4px; }
+.vm-yt svg { width: 12px; height: 12px; }
+.vm-yt:hover { text-decoration: underline; }
+.vm-head-actions { display: flex; align-items: center; gap: 8px; flex-shrink: 0; }
 .video-modal-close {
-  position: absolute; top: 10px; right: 10px; z-index: 2;
-  width: 34px; height: 34px; border-radius: 50%; border: none;
-  background: rgba(0,0,0,.65); color: #fff; font-size: 16px; cursor: pointer;
+  width: 34px; height: 34px; border-radius: 50%; border: 1px solid var(--border);
+  background: rgba(0,0,0,.4); color: #fff; font-size: 16px; cursor: pointer;
   display: flex; align-items: center; justify-content: center;
 }
-.video-modal-close:hover { background: rgba(239,68,68,.85); }
+.video-modal-close:hover { background: rgba(239,68,68,.85); border-color: transparent; }
 .video-modal-frame { aspect-ratio: 16/9; background: #000; }
 .video-modal-frame iframe { width: 100%; height: 100%; border: 0; display: block; }
+.vm-notes {
+  padding: 12px 16px; background: rgba(11,17,32,.7);
+  border-top: 1px solid var(--border);
+}
+.vm-notes textarea {
+  width: 100%; background: rgba(8,13,27,.8); color: var(--text);
+  border: 1px solid var(--border); border-radius: 10px;
+  padding: 10px 12px; font-size: 13px; font-family: inherit;
+  resize: vertical; outline: none;
+}
+.vm-notes textarea:focus { border-color: var(--purple); }
+.vm-notes-actions { display: flex; align-items: center; gap: 10px; margin-top: 8px; }
 
 @media (max-width: 700px) {
   .lvf-grid { grid-template-columns: 1fr; }

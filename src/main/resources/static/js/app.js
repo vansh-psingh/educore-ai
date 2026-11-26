@@ -1309,13 +1309,13 @@ function renderVideoResults(r) {
         <div class="vid-thumb">
           ${v.thumbnail ? `<img src="${esc(v.thumbnail)}" alt="" loading="lazy" referrerpolicy="no-referrer">` : ""}
           ${v.duration ? `<span class="vid-dur">${esc(v.duration)}</span>` : ""}
-          <button class="vid-play" data-embed="${esc(v.embed)}" title="Watch here">${icon("play")}</button>
+          <button class="vid-play" data-embed="${esc(v.embed)}" data-title="${esc(v.title)}" data-url="${esc(v.url)}" data-channel="${esc(v.channel)}" title="Watch here">${icon("play")}</button>
         </div>
         <div class="vid-meta">
           <div class="vid-title">${esc(v.title)}</div>
           <div class="vid-sub muted">${esc(v.channel)}${v.published ? " · " + esc(v.published) : ""}</div>
           <div class="vid-actions">
-            <button class="btn btn-primary btn-sm" data-embed="${esc(v.embed)}">${icon("play")} Watch Here</button>
+            <button class="btn btn-primary btn-sm" data-embed="${esc(v.embed)}" data-title="${esc(v.title)}" data-url="${esc(v.url)}" data-channel="${esc(v.channel)}">${icon("play")} Watch Here</button>
             <a class="btn btn-ghost btn-sm" href="${esc(v.url)}" target="_blank" rel="noopener">${icon("external")} YouTube</a>
           </div>
         </div>
@@ -1329,13 +1329,13 @@ function renderVideoResults(r) {
       <div class="vid-card">
         <div class="vid-thumb vid-thumb-alt">
           <div class="vid-thumb-icon">${icon("video")}</div>
-          <button class="vid-play" data-embed="${esc(embed)}" title="Watch here">${icon("play")}</button>
+          <button class="vid-play" data-embed="${esc(embed)}" data-title="${esc(v.title)}" data-url="${esc(v.url)}" data-channel="${esc(v.channel)}" title="Watch here">${icon("play")}</button>
         </div>
         <div class="vid-meta">
           <div class="vid-title">${esc(v.title)}</div>
           <div class="vid-sub muted">${esc(v.channel)} · smart search</div>
           <div class="vid-actions">
-            <button class="btn btn-primary btn-sm" data-embed="${esc(embed)}">${icon("play")} Watch Here</button>
+            <button class="btn btn-primary btn-sm" data-embed="${esc(embed)}" data-title="${esc(v.title)}" data-url="${esc(v.url)}" data-channel="${esc(v.channel)}">${icon("play")} Watch Here</button>
             <a class="btn btn-ghost btn-sm" href="${esc(v.url)}" target="_blank" rel="noopener">${icon("external")} YouTube</a>
           </div>
         </div>
@@ -1347,22 +1347,67 @@ function renderVideoResults(r) {
     out.innerHTML = `<div class="card" style="margin-top:14px"><div class="muted">No lecture results found. Try broadening the topic or level.</div></div>`;
     return;
   }
-  out.innerHTML = `<div class="vid-grid">${cards.join("")}</div>
+  out.innerHTML = `<div class="vid-results-head">
+      <button class="btn btn-primary btn-sm" id="lvfWatchTop">${icon("play")} Watch Top Lecture Here</button>
+      <span class="muted" style="font-size:12px">${cards.length} result${cards.length === 1 ? "" : "s"}</span>
+    </div>
+    <div class="vid-grid">${cards.join("")}</div>
     <div class="muted" style="margin-top:10px;font-size:12px">Query: “${esc(r.query || "")}”${r.mode === "links" ? " · configure YOUTUBE_API_KEY for direct video results" : ""}</div>`;
+  const firstBtn = out.querySelector("[data-embed]");
+  const topBtn = document.getElementById("lvfWatchTop");
+  if (topBtn && firstBtn) {
+    topBtn.onclick = () => openVideoModal(firstBtn.dataset.embed, {
+      title: firstBtn.dataset.title, url: firstBtn.dataset.url,
+      channel: firstBtn.dataset.channel
+    });
+  }
   out.querySelectorAll("[data-embed]").forEach(b =>
-    b.addEventListener("click", () => openVideoModal(b.dataset.embed)));
+    b.addEventListener("click", () => openVideoModal(b.dataset.embed, {
+      title: b.dataset.title, url: b.dataset.url, channel: b.dataset.channel
+    })));
 }
 
-function openVideoModal(embedUrl) {
+/** Adds autoplay + related-videos-off params to a YouTube embed URL. */
+function withPlayerParams(embedUrl) {
+  const sep = embedUrl.includes("?") ? "&" : "?";
+  return embedUrl + sep + "autoplay=1&rel=0";
+}
+
+function openVideoModal(embedUrl, meta) {
   closeVideoModal();
+  meta = meta || {};
+  const title = meta.title || "Lecture";
+  const channel = meta.channel || "";
+  const url = meta.url || "";
+  const src = withPlayerParams(embedUrl);
+
   const ov = document.createElement("div");
   ov.className = "video-modal";
   ov.innerHTML = `<div class="video-modal-box">
-    <button class="video-modal-close" title="Close">✕</button>
+    <div class="vm-head">
+      <div class="vm-title-wrap">
+        <div class="vm-title">${esc(title)}</div>
+        <div class="vm-sub muted">
+          ${channel ? `<span class="vm-chip">${esc(channel)}</span>` : ""}
+          ${url ? `<a class="vm-yt" href="${esc(url)}" target="_blank" rel="noopener">${icon("external")} Open in YouTube</a>` : ""}
+        </div>
+      </div>
+      <div class="vm-head-actions">
+        <button class="btn btn-ghost btn-sm" id="vmNotesBtn">${icon("notes")} Study Notes</button>
+        <button class="video-modal-close" title="Close player">✕</button>
+      </div>
+    </div>
     <div class="video-modal-frame">
-      <iframe src="${esc(embedUrl)}" title="Lecture video"
+      <iframe src="${esc(src)}" title="${esc(title)}"
         allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
         allowfullscreen></iframe>
+    </div>
+    <div class="vm-notes" id="vmNotes" style="display:none">
+      <textarea id="vmNotesText" rows="4" placeholder="Jot down notes while you watch..."></textarea>
+      <div class="vm-notes-actions">
+        <button class="btn btn-primary btn-sm" id="vmNotesSave">${icon("notes")} Save to Notes Library</button>
+        <span class="muted" id="vmNotesStatus" style="font-size:12px"></span>
+      </div>
     </div>
   </div>`;
   const onKey = e => { if (e.key === "Escape") closeVideoModal(); };
@@ -1370,7 +1415,27 @@ function openVideoModal(embedUrl) {
   ov.addEventListener("click", e => { if (e.target === ov) closeVideoModal(); });
   document.body.appendChild(ov);
   document.addEventListener("keydown", onKey);
+
   ov.querySelector(".video-modal-close").onclick = closeVideoModal;
+  ov.querySelector("#vmNotesBtn").onclick = () => {
+    const p = ov.querySelector("#vmNotes");
+    p.style.display = p.style.display === "none" ? "" : "none";
+  };
+  ov.querySelector("#vmNotesSave").onclick = async () => {
+    const text = ov.querySelector("#vmNotesText").value.trim();
+    const st = ov.querySelector("#vmNotesStatus");
+    if (!text) { st.textContent = "Write something first."; return; }
+    st.textContent = "Saving...";
+    try {
+      await API.noteSave({
+        topic: title + (channel ? " (" + channel + ")" : ""),
+        subject: "Lecture Notes",
+        content: text + (url ? "\n\nSource: " + url : "")
+      });
+      st.textContent = "Saved to Notes History.";
+      ov.querySelector("#vmNotesText").value = "";
+    } catch (e) { st.textContent = "Save failed: " + e.message; }
+  };
 }
 function closeVideoModal() {
   document.querySelectorAll(".video-modal").forEach(m => {
