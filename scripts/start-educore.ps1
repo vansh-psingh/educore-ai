@@ -29,17 +29,21 @@ if (-not (Test-Port8080)) {
 # --- 2. cloudflared tunnel ---
 $tunnelRunning = Get-Process cloudflared -ErrorAction SilentlyContinue
 if (-not $tunnelRunning) {
-    Start-Process -FilePath "cmd.exe" -ArgumentList '/c', "`"$Cf`" tunnel --url http://localhost:8080 >> `"$(Join-Path $LogDir 'tunnel.log')`" 2>&1" -WindowStyle Hidden
+    Start-Process -FilePath $Cf -ArgumentList 'tunnel', '--url', 'http://localhost:8080' `
+        -WindowStyle Hidden `
+        -RedirectStandardOutput (Join-Path $LogDir "tunnel-out.log") `
+        -RedirectStandardError  (Join-Path $LogDir "tunnel.log")
     Start-Sleep -Seconds 15
 }
 
 # --- 3. Discover tunnel URL and patch frontend if it changed ---
-$tunnelLog = Join-Path $LogDir "tunnel.log"
 $url = $null
-if (Test-Path $tunnelLog) {
-    $content = Get-Content $tunnelLog -Raw -ErrorAction SilentlyContinue
-    $m = [regex]::Matches($content, 'https://[a-z0-9\-]+\.trycloudflare\.com')
-    if ($m.Count -gt 0) { $url = $m[$m.Count - 1].Value }
+foreach ($logFile in @((Join-Path $LogDir "tunnel.log"), (Join-Path $LogDir "tunnel-out.log"))) {
+    if (Test-Path $logFile) {
+        $content = Get-Content $logFile -Raw -ErrorAction SilentlyContinue
+        $m = [regex]::Matches($content, 'https://[a-z0-9\-]+\.trycloudflare\.com')
+        if ($m.Count -gt 0) { $url = $m[$m.Count - 1].Value }
+    }
 }
 if (-not $url) { exit 0 }   # tunnel still starting or failed - try again next logon
 

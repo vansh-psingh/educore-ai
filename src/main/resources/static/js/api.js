@@ -10,7 +10,7 @@ const API_BASE = (() => {
     if (saved !== null) return saved;
   } catch (e) { /* ignore */ }
   return /(^|\.)(web\.app|firebaseapp\.com)$/.test(location.hostname)
-    ? "https://hereby-monitored-delivers-pants.trycloudflare.com"   // Cloudflare quick tunnel -> local backend
+    ? "https://quebec-pierce-admit-ever.trycloudflare.com"   // Cloudflare quick tunnel -> local backend
     : "";
 })();
 
