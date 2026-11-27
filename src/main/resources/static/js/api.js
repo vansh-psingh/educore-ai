@@ -349,5 +349,9 @@ const API = {
   classroomJoin(payload) { return this.post("/api/classrooms/join", payload); },
   classroomGet(id) { return this.post(`/api/classrooms/${id}/get`, {}); },
   classroomAnnounce(id, payload) { return this.post(`/api/classrooms/${id}/announce`, payload); },
-  classroomMaterial(id, payload) { return this.post(`/api/classrooms/${id}/material`, payload); }
+  classroomMaterial(id, payload) { return this.post(`/api/classrooms/${id}/material`, payload); },
+  classroomLeave(id) { return this.post(`/api/classrooms/${id}/leave`, {}); },
+  classroomRemove(id, memberId) { return this.post(`/api/classrooms/${id}/remove`, { member_id: memberId }); },
+  classroomUpdate(id, patch) { return this.post(`/api/classrooms/${id}/update`, patch); },
+  classroomDelete(id) { return this.post(`/api/classrooms/${id}/delete`, {}); }
 };

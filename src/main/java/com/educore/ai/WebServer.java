@@ -715,16 +715,13 @@ public final class WebServer {
                 String path = exchange.getRequestURI().getPath();
                 String method = exchange.getRequestMethod();
                 if ("GET".equals(method) && path.equals("/api/classrooms")) {
-                    send(exchange, 200, MAPPER.writeValueAsString(ClassroomService.list()), "application/json");
+                    send(exchange, 200, MAPPER.writeValueAsString(ClassroomService.list(authUser)), "application/json");
                     return;
                 }
                 if ("POST".equals(method)) {
                     JsonNode req = readJson(exchange);
                     if (path.equals("/api/classrooms/create")) {
-                        if (!"teacher".equals(authUser.role()) && !"admin".equals(authUser.role())) {
-                            send(exchange, 403, "{\"error\":\"only teachers or admins can create classrooms\"}", "application/json");
-                            return;
-                        }
+                        // any authenticated user may create; creator becomes owner
                         sendJson(exchange, 200, ClassroomService.create(req, authUser));
                     } else if (path.equals("/api/classrooms/join")) {
                         sendJson(exchange, 200, ClassroomService.join(req, authUser));
@@ -737,8 +734,17 @@ public final class WebServer {
                             sendJson(exchange, 200, ClassroomService.announce(id, req, authUser));
                         } else if (action.equals("material")) {
                             sendJson(exchange, 200, ClassroomService.addMaterial(id, req, authUser));
+                        } else if (action.equals("leave")) {
+                            sendJson(exchange, 200, ClassroomService.leave(id, authUser));
+                        } else if (action.equals("remove")) {
+                            sendJson(exchange, 200, ClassroomService.removeMember(id, req, authUser));
+                        } else if (action.equals("update")) {
+                            sendJson(exchange, 200, ClassroomService.update(id, req, authUser));
+                        } else if (action.equals("delete")) {
+                            ClassroomService.delete(id, authUser);
+                            send(exchange, 200, "{\"ok\":true}", "application/json");
                         } else if (action.equals("get") || action.isEmpty()) {
-                            sendJson(exchange, 200, ClassroomService.get(id));
+                            sendJson(exchange, 200, ClassroomService.get(id, authUser));
                         } else {
                             send(exchange, 404, "{\"error\":\"unknown classroom action\"}", "application/json");
                         }

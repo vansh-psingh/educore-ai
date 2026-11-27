@@ -603,26 +603,27 @@ function renderTaskList() {
 /* ============================ CLASSROOMS ============================ */
 
 function vClassrooms(root) {
+  const me = state.user || {};
   root.innerHTML = `
   <div class="view">
-    <div class="view-header"><h2>Classrooms</h2><p>Join classes with a code, or create your own. Teacher/admin role management is planned.</p></div>
+    <div class="view-header"><h2>Classrooms</h2><p>Create a class or join one with a code - announcements and materials are shared with every member.</p></div>
     <div class="grid grid-2">
       <div class="card">
         <div class="section-title" style="margin-top:0">${icon("plus")} Create classroom</div>
-        <div class="field"><label>Name</label><input type="text" id="crName" placeholder="Math Club"></div>
-        <div class="form-grid">
-          <div class="field"><label>Your name (teacher)</label><input type="text" id="crTeacher" placeholder="Ms. Rao"></div>
-          <div class="field"><label>Description</label><input type="text" id="crDesc" placeholder="Weekly practice"></div>
-        </div>
-        <button class="btn btn-primary" id="crCreate">${icon("plus")} Create</button>
+        <p class="muted" style="font-size:12px;margin-bottom:10px">You'll be the owner${me.name ? " (" + esc(me.name) + ")" : ""} and get a shareable join code.</p>
+        <div class="field"><label>Classroom name</label><input type="text" id="crName" placeholder="e.g. B.Tech CSE - Data Structures" maxlength="80"></div>
+        <div class="field"><label>Description (optional)</label><input type="text" id="crDesc" placeholder="e.g. Weekly practice + doubts" maxlength="300"></div>
+        <button class="btn btn-primary" id="crCreate">${icon("plus")} Create classroom</button>
       </div>
       <div class="card">
         <div class="section-title" style="margin-top:0">${icon("users")} Join with code</div>
+        <p class="muted" style="font-size:12px;margin-bottom:10px">Enter the 6-character code shared by the classroom owner.</p>
         <div style="display:flex;gap:8px">
-          <input type="text" id="crCode" placeholder="6-char code" style="flex:1;text-transform:uppercase">
-          <input type="text" id="crStudent" placeholder="Your name" style="flex:1">
-          <button class="btn btn-ghost" id="crJoin">Join</button>
+          <input type="text" id="crCode" placeholder="ABC123" maxlength="6"
+            style="flex:1;text-transform:uppercase;letter-spacing:.2em;font-weight:700;text-align:center">
+          <button class="btn btn-primary" id="crJoin">${icon("users")} Join</button>
         </div>
+        <div class="muted" id="crJoinMsg" style="margin-top:8px;font-size:12px"></div>
       </div>
     </div>
     <div class="section-title">${icon("classrooms")} Your classrooms</div>
@@ -633,26 +634,40 @@ function vClassrooms(root) {
   document.getElementById("crCreate").onclick = async () => {
     const name = document.getElementById("crName").value.trim();
     if (!name) { toast("Enter a classroom name."); return; }
-    const c = await API.classroomCreate({
-      name,
-      teacher: document.getElementById("crTeacher").value || "Teacher",
-      description: document.getElementById("crDesc").value
-    });
-    toast("Classroom created! Join code: " + c.code);
-    loadClassrooms();
+    const btn = document.getElementById("crCreate");
+    btn.disabled = true;
+    try {
+      const c = await API.classroomCreate({ name, description: document.getElementById("crDesc").value });
+      toast("Classroom created! Code: " + c.code);
+      document.getElementById("crName").value = "";
+      document.getElementById("crDesc").value = "";
+      loadClassrooms();
+      openClassroom(c.id);
+    } catch (e) { toast(e.message); }
+    finally { btn.disabled = false; }
   };
   document.getElementById("crJoin").onclick = async () => {
     const code = document.getElementById("crCode").value.trim();
-    const student = document.getElementById("crStudent").value.trim() || "Student";
+    const msg = document.getElementById("crJoinMsg");
     if (!code) { toast("Enter a join code."); return; }
+    msg.textContent = "Joining...";
     try {
-      await API.classroomJoin({ code, student });
-      toast("Joined classroom!");
+      const c = await API.classroomJoin({ code });
+      msg.textContent = "";
+      toast(c.my_role === "owner" ? "You're the owner of this classroom." : "Joined classroom!");
+      document.getElementById("crCode").value = "";
       loadClassrooms();
-    } catch (e) { toast(e.message); }
+      openClassroom(c.id);
+    } catch (e) { msg.textContent = e.message; }
   };
   loadClassrooms();
 }
+
+function crMemberName(m) {
+  // legacy entries are plain strings; new entries are {id,name,role,joined}
+  return typeof m === "string" ? m : (m.name || "Member");
+}
+function crMemberObj(m) { return typeof m === "string" ? null : m; }
 
 async function loadClassrooms() {
   const list = document.getElementById("crList");
@@ -660,59 +675,148 @@ async function loadClassrooms() {
   try {
     const rooms = await API.classrooms();
     if (!rooms.length) {
-      list.innerHTML = '<div class="muted">No classrooms yet - create one or join with a code.</div>';
+      list.innerHTML = `<div class="empty-state" style="grid-column:1/-1;padding:34px 10px">
+        ${icon("classrooms")}<h3>No classrooms yet</h3>
+        <p>Create one above or ask your teacher for a join code.</p></div>`;
       return;
     }
     list.innerHTML = rooms.map(c => `
       <div class="card quick-card hoverable" data-room="${c.id}">
         <div class="icon-wrap" style="background:var(--grad-soft);color:var(--purple)">${icon("classrooms")}</div>
         <h3>${esc(c.name)}</h3>
-        <p>${esc(c.teacher)} · ${c.members.length} member(s)<br><span class="muted">code: ${esc(c.code)}</span></p>
+        <p>${esc(c.teacher || "Teacher")} · ${c.member_count ?? (c.members || []).length} member(s)<br>
+          <span class="muted">code: ${esc(c.code)}</span>
+          ${c.my_role === "owner" ? ' <span class="cr-role cr-role-owner">Owner</span>' : ' <span class="cr-role">Student</span>'}</p>
         <button class="btn btn-ghost" data-open="${c.id}">Open</button>
       </div>`).join("");
     list.querySelectorAll("[data-open]").forEach(b =>
       b.addEventListener("click", () => openClassroom(b.dataset.open)));
-  } catch (e) { list.innerHTML = '<div class="muted">Could not load classrooms.</div>'; }
+  } catch (e) { list.innerHTML = '<div class="muted">Could not load classrooms: ' + esc(e.message) + '</div>'; }
 }
 
 async function openClassroom(id) {
   const detail = document.getElementById("crDetail");
+  const me = state.user || {};
   try {
     const c = await API.classroomGet(id);
+    const isOwner = c.my_role === "owner" || c.my_role === "admin";
+    const members = c.members || [];
+
     detail.innerHTML = `
     <div class="card">
-      <div class="section-title" style="margin-top:0">${esc(c.name)} <span class="coming-soon-tag">code ${esc(c.code)}</span></div>
-      <p class="muted">${esc(c.description || "No description")} · Teacher: ${esc(c.teacher)}</p>
-      <div class="section-title">Members (${c.members.length})</div>
-      <div class="chips">${c.members.map(m => `<span class="chip">${esc(m)}</span>`).join("") || '<span class="muted">none yet</span>'}</div>
+      <div class="section-title" style="margin-top:0;display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+        ${esc(c.name)}
+        <span class="coming-soon-tag">code ${esc(c.code)}</span>
+        <button class="chip" id="crCopyCode" title="Copy join code">copy code</button>
+        ${isOwner ? '<span class="cr-role cr-role-owner">Owner</span>' : '<span class="cr-role">Student</span>'}
+      </div>
+      <p class="muted">${esc(c.description || "No description")} · Teacher: ${esc(c.teacher || "-")} · ${c.member_count ?? members.length} member(s)</p>
+      ${isOwner ? `
+      <div style="display:flex;gap:8px;flex-wrap:wrap;margin:10px 0">
+        <button class="chip" id="crEditBtn">edit info</button>
+        <button class="chip danger" id="crDeleteBtn">delete classroom</button>
+      </div>
+      <div id="crEditForm" style="display:none">
+        <div class="field"><label>Name</label><input type="text" id="crEditName" value="${esc(c.name)}" maxlength="80"></div>
+        <div class="field"><label>Description</label><input type="text" id="crEditDesc" value="${esc(c.description || "")}" maxlength="300"></div>
+        <button class="btn btn-primary btn-sm" id="crEditSave">Save changes</button>
+      </div>` : `
+      <div style="margin:10px 0"><button class="chip danger" id="crLeaveBtn">leave classroom</button></div>`}
+      <div class="section-title">Members (${c.member_count ?? members.length})</div>
+      <div class="chips">${members.map(m => {
+        const o = crMemberObj(m);
+        const mid = o ? o.id : "";
+        const role = o ? (o.role || "student") : "";
+        const isMe = mid && mid === me.id;
+        return `<span class="chip" title="${esc(o ? (o.joined || "") : "")}">${esc(crMemberName(m))}${role === "owner" ? ' ★' : ""}${isMe ? " (you)" : ""}
+          ${isOwner && mid && mid !== me.id && mid !== c.owner_id ? `<button class="chip danger" style="margin-left:6px;padding:0 6px" data-rm="${esc(mid)}" title="Remove">✕</button>` : ""}
+        </span>`;
+      }).join("") || '<span class="muted">none yet</span>'}</div>
       <div class="section-title">Announcements</div>
-      <div id="crAnns">${c.announcements.length ? c.announcements.slice().reverse().map(a =>
-        `<div class="quiz-q"><div class="muted"><strong>${esc(a.author)}</strong> · ${esc((a.at || "").slice(0, 10))}</div><div>${esc(a.text)}</div></div>`).join("") : '<div class="muted">No announcements.</div>'}</div>
+      <div id="crAnns">${(c.announcements || []).length ? c.announcements.slice().reverse().map(a =>
+        `<div class="quiz-q"><div class="muted"><strong>${esc(a.author)}</strong> · ${esc((a.at || "").slice(0, 10))}</div><div>${esc(a.text)}</div></div>`).join("") : '<div class="muted">No announcements yet.</div>'}</div>
       <div style="display:flex;gap:8px;margin-top:10px">
-        <input type="text" id="crAnnText" placeholder="Post an announcement..." style="flex:1">
-        <input type="text" id="crAnnAuthor" placeholder="Your name" style="width:140px">
+        <input type="text" id="crAnnText" placeholder="Post an announcement..." style="flex:1" maxlength="1000">
         <button class="btn btn-primary" id="crAnnGo">Post</button>
       </div>
       <div class="section-title">Shared materials</div>
-      <div>${c.materials.length ? c.materials.map(m =>
-        `<div class="quiz-q"><strong>${esc(m.name)}</strong> <span class="muted">(${esc(m.type)})</span>${m.url ? ` <a href="${esc(m.url)}" target="_blank" style="color:var(--cyan)">open</a>` : ""}</div>`).join("") : '<div class="muted">No materials yet.</div>'}</div>
+      <div>${(c.materials || []).length ? c.materials.map(m =>
+        `<div class="quiz-q"><strong>${esc(m.name)}</strong> <span class="muted">(${esc(m.type || "link")})</span>${m.url ? ` <a href="${esc(m.url)}" target="_blank" rel="noopener" style="color:var(--cyan)">open</a>` : ""}</div>`).join("") : '<div class="muted">No materials yet.</div>'}</div>
       <div style="display:flex;gap:8px;margin-top:10px">
-        <input type="text" id="crMatName" placeholder="Material name" style="flex:1">
+        <input type="text" id="crMatName" placeholder="Material name" style="flex:1" maxlength="120">
         <input type="text" id="crMatUrl" placeholder="Link (optional)" style="flex:1">
         <button class="btn btn-ghost" id="crMatGo">Add material</button>
       </div>
     </div>`;
+
+    document.getElementById("crCopyCode").onclick = () => {
+      navigator.clipboard.writeText(c.code).then(() => toast("Join code copied: " + c.code)).catch(() => toast("Code: " + c.code));
+    };
+
+    const editBtn = document.getElementById("crEditBtn");
+    if (editBtn) editBtn.onclick = () => {
+      const f = document.getElementById("crEditForm");
+      f.style.display = f.style.display === "none" ? "" : "none";
+    };
+    const editSave = document.getElementById("crEditSave");
+    if (editSave) editSave.onclick = async () => {
+      try {
+        await API.classroomUpdate(id, {
+          name: document.getElementById("crEditName").value.trim(),
+          description: document.getElementById("crEditDesc").value.trim()
+        });
+        toast("Classroom updated.");
+        openClassroom(id); loadClassrooms();
+      } catch (e) { toast(e.message); }
+    };
+    const delBtn = document.getElementById("crDeleteBtn");
+    if (delBtn) delBtn.onclick = async () => {
+      if (!confirm(`Delete "${c.name}"? This removes it for all ${c.member_count ?? members.length} members and cannot be undone.`)) return;
+      try {
+        await API.classroomDelete(id);
+        toast("Classroom deleted.");
+        detail.innerHTML = "";
+        loadClassrooms();
+      } catch (e) { toast(e.message); }
+    };
+    const leaveBtn = document.getElementById("crLeaveBtn");
+    if (leaveBtn) leaveBtn.onclick = async () => {
+      if (!confirm(`Leave "${c.name}"?`)) return;
+      try {
+        await API.classroomLeave(id);
+        toast("You left the classroom.");
+        detail.innerHTML = "";
+        loadClassrooms();
+      } catch (e) { toast(e.message); }
+    };
+    detail.querySelectorAll("[data-rm]").forEach(b =>
+      b.addEventListener("click", async () => {
+        const memberId = b.dataset.rm;
+        const memberName = b.closest(".chip").childNodes[0].textContent.trim();
+        if (!confirm(`Remove ${memberName} from this classroom?`)) return;
+        try {
+          await API.classroomRemove(id, memberId);
+          toast("Member removed.");
+          openClassroom(id); loadClassrooms();
+        } catch (e) { toast(e.message); }
+      }));
+
     document.getElementById("crAnnGo").onclick = async () => {
       const text = document.getElementById("crAnnText").value.trim();
       if (!text) return;
-      await API.classroomAnnounce(id, { text, author: document.getElementById("crAnnAuthor").value || "Teacher" });
-      openClassroom(id); loadClassrooms();
+      try {
+        await API.classroomAnnounce(id, { text });
+        document.getElementById("crAnnText").value = "";
+        openClassroom(id); loadClassrooms();
+      } catch (e) { toast(e.message); }
     };
     document.getElementById("crMatGo").onclick = async () => {
       const name = document.getElementById("crMatName").value.trim();
       if (!name) return;
-      await API.classroomMaterial(id, { name, url: document.getElementById("crMatUrl").value, type: "link" });
-      openClassroom(id);
+      try {
+        await API.classroomMaterial(id, { name, url: document.getElementById("crMatUrl").value, type: "link" });
+        openClassroom(id);
+      } catch (e) { toast(e.message); }
     };
     detail.scrollIntoView({ behavior: "smooth" });
   } catch (e) { toast(e.message); }
